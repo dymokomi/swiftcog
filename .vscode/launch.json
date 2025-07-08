@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Debug swiftcog",
+            "program": "${workspaceFolder:swiftcog}/.build/debug/swiftcog",
+            "preLaunchTask": "swift: Build Debug swiftcog"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Release swiftcog",
+            "program": "${workspaceFolder:swiftcog}/.build/release/swiftcog",
+            "preLaunchTask": "swift: Build Release swiftcog"
+        }
+    ]
+}
