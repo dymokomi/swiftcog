@@ -5,12 +5,14 @@ public class SensingInterfaceKernel: Kernel {
     private let system: KernelSystem
     private let speechEngine: SpeechToTextEngine
     private let customHandler: ((KernelMessage, SensingInterfaceKernel) async throws -> Void)?
+    private let speechInputCallback: ((String) -> Void)?
     private let kernelId = KernelID.sensingInterface
 
-    public init(system: KernelSystem, apiKey: String, customHandler: ((KernelMessage, SensingInterfaceKernel) async throws -> Void)? = nil) {
+    public init(system: KernelSystem, apiKey: String, customHandler: ((KernelMessage, SensingInterfaceKernel) async throws -> Void)? = nil, speechInputCallback: ((String) -> Void)? = nil) {
         self.system = system
         self.speechEngine = SpeechToTextEngine(apiKey: apiKey)
         self.customHandler = customHandler
+        self.speechInputCallback = speechInputCallback
     }
 
     public func getKernelId() -> KernelID {
@@ -36,6 +38,9 @@ public class SensingInterfaceKernel: Kernel {
     
     private func processSpeechInput(_ speechText: String) async {
         print("Frontend captured speech: '\(speechText)'")
+        
+        // Notify the UI about the speech input first
+        speechInputCallback?(speechText)
         
         let message = KernelMessage(
             id: UUID(),

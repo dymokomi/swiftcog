@@ -66,8 +66,8 @@ public class KernelSystem: AsyncMessageHandler {
     
     // MARK: - Frontend Interface Kernels
     
-    public func createSensingInterfaceKernel(customHandler: ((KernelMessage, SensingInterfaceKernel) async throws -> Void)? = nil) async throws -> SensingInterfaceKernel {
-        let kernel = SensingInterfaceKernel(system: self, apiKey: apiKey, customHandler: customHandler)
+    public func createSensingInterfaceKernel(customHandler: ((KernelMessage, SensingInterfaceKernel) async throws -> Void)? = nil, speechInputCallback: ((String) -> Void)? = nil) async throws -> SensingInterfaceKernel {
+        let kernel = SensingInterfaceKernel(system: self, apiKey: apiKey, customHandler: customHandler, speechInputCallback: speechInputCallback)
         let kernelId = kernel.getKernelId()
         kernels[kernelId] = kernel
         sensingInterfaceKernels.append(kernel)
@@ -104,17 +104,29 @@ public class KernelSystem: AsyncMessageHandler {
     // MARK: - AsyncMessageHandler
     
     public func handleMessage(_ message: KernelMessage) async throws {
+        print("🔄 KernelSystem.handleMessage() - Mode: \(mode), Message: \(message.sourceKernelId) -> '\(message.payload)'")
+        
         if mode == .backend {
             // Backend received message from frontend - route to appropriate kernel
+            print("📥 Backend routing message to SensingKernel")
             if let sensingKernel = sensingKernels.first {
                 try await sensingKernel.receive(message: message)
+            } else {
+                print("❌ No sensing kernel available on backend!")
             }
         } else {
             // Frontend received message from backend - route to interface kernels
+            print("📥 Frontend routing message to ExpressionInterfaceKernel")
+            var foundKernel = false
             for (_, kernel) in kernels {
                 if let expressionInterface = kernel as? ExpressionInterfaceKernel {
+                    print("✅ Found ExpressionInterfaceKernel, sending message")
                     try await expressionInterface.receive(message: message)
+                    foundKernel = true
                 }
+            }
+            if !foundKernel {
+                print("❌ No ExpressionInterfaceKernel found on frontend!")
             }
         }
     }
@@ -125,24 +137,31 @@ public class KernelSystem: AsyncMessageHandler {
         let sourceId = source.getKernelId()
         let destinationId = destination.getKernelId()
         connections[sourceId] = destinationId
+        print("🔗 Connected \(sourceId) -> \(destinationId)")
     }
 
     public func emit(message: KernelMessage, from emitter: any Kernel) async throws {
         let emitterId = emitter.getKernelId()
+        print("🚀 KernelSystem.emit() - From: \(emitterId), Mode: \(mode), Message: '\(message.payload)'")
         
         if mode == .frontend {
             // Frontend: Send to backend via TCP
+            print("📤 Frontend sending to backend via TCP")
             try await sendToBackend(message)
         } else {
             // Backend: Local routing then send to frontend asynchronously
             if let destinationId = connections[emitterId],
                let destinationKernel = kernels[destinationId] {
                 // Forward to next kernel in pipeline
+                print("🔀 Backend routing \(emitterId) -> \(destinationId)")
                 try await destinationKernel.receive(message: message)
+            } else {
+                print("⚠️ No connection found for \(emitterId)")
             }
             
             // If this is the final kernel (like ExpressionKernel), send to frontend asynchronously
             if emitter is ExpressionKernel {
+                print("📤 Backend sending to frontend via TCP (ExpressionKernel)")
                 sendToFrontend(message)
             }
         }

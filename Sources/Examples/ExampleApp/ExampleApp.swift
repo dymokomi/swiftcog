@@ -1,5 +1,7 @@
 import Foundation
 import SwiftCogCore
+import SwiftUI
+import AppKit
 
 public class ExampleApp: SwiftCogApp {
     public static let appName = "ExampleApp"
@@ -17,6 +19,9 @@ public class ExampleApp: SwiftCogApp {
     // Frontend interface kernels
     private var sensingInterfaceKernel: SensingInterfaceKernel?
     private var expressionInterfaceKernel: ExpressionInterfaceKernel?
+    
+    // Frontend chat controller
+    private var chatController: WebChatController?
 
     private init(system: KernelSystem, llmService: LLMService) {
         self.system = system
@@ -112,21 +117,70 @@ public class ExampleApp: SwiftCogApp {
         
         print("ExampleApp: Initializing frontend interface kernels...")
         
-        // Create SensingInterfaceKernel for speech input
-        app.sensingInterfaceKernel = try await system.createSensingInterfaceKernel { message, kernel in
-            print("Frontend SensingInterfaceKernel: Got speech input: \(message.payload)")
-        }
+        // Create SensingInterfaceKernel for user input
+        app.sensingInterfaceKernel = try await system.createSensingInterfaceKernel(
+            customHandler: { message, kernel in
+                print("Frontend SensingInterfaceKernel: Got user input: \(message.payload)")
+            },
+            speechInputCallback: { [weak app] speechText in
+                print("🎯 ExampleApp: Speech input callback: '\(speechText)'")
+                // Add the user's speech to the chat interface
+                app?.chatController?.addMessage(speechText, isUser: true)
+            }
+        )
         
-        // Create ExpressionInterfaceKernel for output display
-        app.expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { message, kernel in
-            print("AI Response: \(message.payload)")
-            // In a real UI app, this would update the interface with the response
+        // Create ExpressionInterfaceKernel for AI responses
+        app.expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { [weak app] message, kernel in
+            print("🎯 ExampleApp: ExpressionInterfaceKernel received message: '\(message.payload)'")
+            // Extract the AI response from the formatted message
+            let response = message.payload.replacingOccurrences(of: "SwiftCog Response: ", with: "")
+            print("🎯 ExampleApp: Extracted response: '\(response)'")
+            Task { @MainActor in
+                print("🎯 ExampleApp: Updating chat view with response")
+                app?.chatController?.addMessage(response, isUser: false)
+            }
         }
         
         print("ExampleApp: Frontend interface kernels created")
-        print("ExampleApp: Frontend setup complete - will connect to backend when TCP client starts")
         
         return app as! Self
+    }
+    
+    /// Launch the SwiftUI chat window for frontend mode
+    public func launchChatWindow() {
+        let chatController = WebChatController { userMessage in
+            Task {
+                // Send user message through the sensing interface kernel
+                let message = KernelMessage(sourceKernelId: .sensingInterface, payload: userMessage)
+                try? await self.system.emit(message: message, from: self.sensingInterfaceKernel!)
+            }
+        }
+        
+        // Store reference to chat view for AI responses
+        self.chatController = chatController
+        print("🎯 ExampleApp: Stored chatView reference: \(chatController)")
+        
+        // Create and launch the SwiftUI window
+        let contentView = NavigationView {
+            chatController.view
+        }
+        
+        DispatchQueue.main.async {
+            let hostingController = NSHostingController(rootView: contentView)
+            let window = NSWindow(contentViewController: hostingController)
+            
+            window.title = "SwiftCog Chat"
+            window.setContentSize(NSSize(width: 1000, height: 700))
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+            
+            // Keep the window alive
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            
+            print("ExampleApp: SwiftUI chat window launched!")
+        }
     }
 }
 

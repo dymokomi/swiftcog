@@ -3,6 +3,7 @@ import Examples
 import ArgumentParser
 import DotEnv
 import Foundation
+import AppKit
 
 @main
 struct SwiftCogCLI: AsyncParsableCommand {
@@ -68,9 +69,12 @@ struct SwiftCogCLI: AsyncParsableCommand {
                     try await group.next()
                 }
             } else {
-                let _ = try await ExampleApp.initFrontend(system: system)
+                let app = try await ExampleApp.initFrontend(system: system)
                 let tasks = system.run()
-                print("Frontend starting - connecting to backend and starting speech recognition")
+                print("Frontend starting - connecting to backend and launching chat window")
+                
+                // Launch the SwiftUI chat window
+                app.launchChatWindow()
                 
                 // Wait for all frontend tasks to complete
                 try await withThrowingTaskGroup(of: Void.self) { group in

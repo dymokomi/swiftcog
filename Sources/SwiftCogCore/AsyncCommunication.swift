@@ -101,6 +101,7 @@ public class TCPServer {
     }
     
     public func sendToClients(_ message: KernelMessage) {
+        print("🌐 TCP Server: Sending message to \(connections.count) client(s): '\(message.payload)'")
         let asyncMessage = AsyncMessage(type: "kernelMessage", kernelMessage: message)
         
         do {
@@ -111,12 +112,14 @@ public class TCPServer {
             for connection in connections {
                 connection.send(content: messageData, completion: .contentProcessed { error in
                     if let error = error {
-                        print("Failed to send to client: \(error)")
+                        print("❌ TCP Server: Failed to send to client: \(error)")
+                    } else {
+                        print("✅ TCP Server: Message sent successfully")
                     }
                 })
             }
         } catch {
-            print("Failed to encode message: \(error)")
+            print("❌ TCP Server: Failed to encode message: \(error)")
         }
     }
     
@@ -195,14 +198,16 @@ public class TCPClient {
                 let lineData = line.data(using: .utf8)!
                 let message = try JSONDecoder().decode(AsyncMessage.self, from: lineData)
                 
+                print("🌐 TCP Client: Received message: '\(message.kernelMessage.payload)'")
                 try await messageHandler?.handleMessage(message.kernelMessage)
             }
         } catch {
-            print("Failed to decode message: \(error)")
+            print("❌ TCP Client: Failed to decode message: \(error)")
         }
     }
     
     public func send(_ message: KernelMessage) async throws {
+        print("🌐 TCP Client: Sending message: '\(message.payload)'")
         let asyncMessage = AsyncMessage(type: "kernelMessage", kernelMessage: message)
         let data = try JSONEncoder().encode(asyncMessage)
         let jsonString = String(data: data, encoding: .utf8)! + "\n"
@@ -211,8 +216,10 @@ public class TCPClient {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection?.send(content: messageData, completion: .contentProcessed { error in
                 if let error = error {
+                    print("❌ TCP Client: Failed to send: \(error)")
                     continuation.resume(throwing: error)
                 } else {
+                    print("✅ TCP Client: Message sent successfully")
                     continuation.resume()
                 }
             })
