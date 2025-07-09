@@ -19,7 +19,7 @@ struct ChatMessage: Codable {
 }
 
 // MARK: - Chat Controller
-class WebChatController: ObservableObject {
+public class WebChatController: ObservableObject {
     @Published var messages: [ChatMessage] = []
     private var webView: WKWebView?
     private var onMessageSent: ((String) -> Void)?
@@ -28,11 +28,11 @@ class WebChatController: ObservableObject {
     private var reloadWorkItem: DispatchWorkItem?
     
     // Create the view that references this controller
-    lazy var view: WebChatView = {
+    public lazy var view: WebChatView = {
         return WebChatView(controller: self)
     }()
     
-    init(onMessageSent: @escaping (String) -> Void) {
+    public init(onMessageSent: @escaping (String) -> Void) {
         self.onMessageSent = onMessageSent
     }
     
@@ -189,7 +189,7 @@ class WebChatController: ObservableObject {
         onMessageSent?(message)
     }
     
-    func addMessage(_ content: String, isUser: Bool = false) {
+    public func addMessage(_ content: String, isUser: Bool = false) {
         DispatchQueue.main.async {
             if isUser {
                 print("🎯 WebChatController: Adding USER message to WebView: '\(content)'")
@@ -332,18 +332,18 @@ struct WebViewWrapper: NSViewRepresentable {
 }
 
 // MARK: - Main SwiftUI Chat View
-struct WebChatView: View {
+public struct WebChatView: View {
     @ObservedObject var controller: WebChatController
     let onMessageSent: (String) -> Void
     
-    init(controller: WebChatController) {
+    public init(controller: WebChatController) {
         self.controller = controller
         self.onMessageSent = { message in
             controller.handleUserMessage(message)
         }
     }
     
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             WebViewWrapper(controller: controller, onMessageSent: onMessageSent)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -352,7 +352,7 @@ struct WebChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    func addMessage(_ content: String, isUser: Bool) {
+    public func addMessage(_ content: String, isUser: Bool) {
         if !isUser {
             controller.addMessage(content)
         }

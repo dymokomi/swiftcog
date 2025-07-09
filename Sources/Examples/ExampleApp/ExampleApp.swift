@@ -2,13 +2,14 @@ import Foundation
 import SwiftCogCore
 import SwiftUI
 import AppKit
+import WebKit
 
 public class ExampleApp: SwiftCogApp {
     public static let appName = "ExampleApp"
     public static let appDescription = "A simple example cognitive architecture application"
     
-    let system: KernelSystem
-    let llmService: LLMService
+    public var system: KernelSystem
+    public var llmService: LLMService
     
     // Backend kernels
     private var sensingKernel: SensingKernel?
@@ -17,11 +18,12 @@ public class ExampleApp: SwiftCogApp {
     private var expressionKernel: ExpressionKernel?
     
     // Frontend interface kernels
-    private var sensingInterfaceKernel: SensingInterfaceKernel?
-    private var expressionInterfaceKernel: ExpressionInterfaceKernel?
+    public var sensingInterfaceKernel: SensingInterfaceKernel?
+    public var expressionInterfaceKernel: ExpressionInterfaceKernel?
     
     // Frontend chat controller
-    private var chatController: WebChatController?
+    public var chatController: WebChatController?
+    private var mainWindow: NSWindow?
 
     private init(system: KernelSystem, llmService: LLMService) {
         self.system = system
@@ -167,15 +169,34 @@ public class ExampleApp: SwiftCogApp {
             let hostingController = NSHostingController(rootView: contentView)
             let window = NSWindow(contentViewController: hostingController)
             
+            // Keep a strong reference to the window
+            self.mainWindow = window
+
             window.title = "SwiftCog Chat"
             window.setContentSize(NSSize(width: 1000, height: 700))
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.minSize = NSSize(width: 400, height: 300)
+            window.isRestorable = false
+            window.tabbingMode = .disallowed
+            
+            // Explicitly enable window controls
+            window.standardWindowButton(.closeButton)?.isEnabled = true
+            window.standardWindowButton(.miniaturizeButton)?.isEnabled = true
+            window.standardWindowButton(.zoomButton)?.isEnabled = true
+            
+            // Ensure the window can receive events properly
+            window.acceptsMouseMovedEvents = true
+            window.isMovableByWindowBackground = false
+            
+            // Properly activate the application so the window becomes interactive
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            
             window.center()
             window.makeKeyAndOrderFront(nil)
             
-            // Keep the window alive
-            NSApp.setActivationPolicy(.regular)
+            // Force the window to become the key window and accept events
+            window.makeKey()
             NSApp.activate(ignoringOtherApps: true)
             
             print("ExampleApp: SwiftUI chat window launched!")

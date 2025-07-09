@@ -12,6 +12,9 @@ let package = Package(
         .executable(
             name: "SwiftCog",
             targets: ["SwiftCog"]),
+        .executable(
+            name: "SwiftCogGUI",
+            targets: ["SwiftCogGUI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.2.0"),
@@ -41,6 +44,14 @@ let package = Package(
                 .product(name: "DotEnv", package: "DotEnv")
             ],
             path: "Sources/SwiftCog"
+        ),
+        .executableTarget(
+            name: "SwiftCogGUI",
+            dependencies: [
+                "SwiftCogCore",
+                "Examples"
+            ],
+            path: "Sources/SwiftCogGUI"
         ),
     ]
 )

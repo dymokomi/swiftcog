@@ -53,6 +53,24 @@
             "name": "Release SwiftCog",
             "program": "${workspaceFolder:swiftcog}/.build/release/SwiftCog",
             "preLaunchTask": "swift: Build Release SwiftCog"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Debug SwiftCogGUI",
+            "program": "${workspaceFolder:swiftcog}/.build/debug/SwiftCogGUI",
+            "preLaunchTask": "swift: Build Debug SwiftCogGUI"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Release SwiftCogGUI",
+            "program": "${workspaceFolder:swiftcog}/.build/release/SwiftCogGUI",
+            "preLaunchTask": "swift: Build Release SwiftCogGUI"
         }
     ]
 }
