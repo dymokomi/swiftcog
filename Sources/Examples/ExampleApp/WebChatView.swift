@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Foundation
+import Darwin
 
 // MARK: - Chat Message Model
 struct ChatMessage: Codable {
@@ -22,6 +23,9 @@ class WebChatController: ObservableObject {
     @Published var messages: [ChatMessage] = []
     private var webView: WKWebView?
     private var onMessageSent: ((String) -> Void)?
+    private var fileWatcher: DispatchSourceFileSystemObject?
+    private var htmlFileURL: URL?
+    private var reloadWorkItem: DispatchWorkItem?
     
     // Create the view that references this controller
     lazy var view: WebChatView = {
@@ -34,6 +38,145 @@ class WebChatController: ObservableObject {
     
     func setup(webView: WKWebView) {
         self.webView = webView
+        setupFileWatcher()
+    }
+    
+    private func setupFileWatcher() {
+        // For development, watch the source file instead of bundled resource
+        let sourceFileURL = URL(fileURLWithPath: "Sources/Examples/ExampleApp/chat.html")
+        
+        let targetURL: URL
+        if FileManager.default.fileExists(atPath: sourceFileURL.path) {
+            // Development mode - watch source file
+            targetURL = sourceFileURL
+            print("🔥 Hot reload: Development mode - watching source file")
+        } else {
+            // Production mode - watch bundled resource
+            guard let htmlURL = Bundle.module.url(forResource: "chat", withExtension: "html") else {
+                print("⚠️ Hot reload: Could not find HTML file to watch")
+                return
+            }
+            targetURL = htmlURL
+            print("🔥 Hot reload: Production mode - watching bundled resource")
+        }
+        
+        self.htmlFileURL = targetURL
+        
+        // Create file descriptor for watching
+        let fileDescriptor = open(targetURL.path, O_EVTONLY)
+        guard fileDescriptor >= 0 else {
+            print("⚠️ Hot reload: Could not open file descriptor for \(targetURL.path)")
+            return
+        }
+        
+        // Create dispatch source for file system events
+        fileWatcher = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fileDescriptor,
+            eventMask: [.write, .extend],
+            queue: DispatchQueue.main
+        )
+        
+        fileWatcher?.setEventHandler { [weak self] in
+            self?.debounceReload()
+        }
+        
+        fileWatcher?.setCancelHandler {
+            close(fileDescriptor)
+        }
+        
+        fileWatcher?.resume()
+        print("🔥 Hot reload: File watcher started for \(targetURL.lastPathComponent)")
+        print("🔥 Hot reload: Edit \(targetURL.path) to see live changes!")
+    }
+    
+    private func debounceReload() {
+        // Cancel any pending reload
+        reloadWorkItem?.cancel()
+        
+        // Create new reload work item with delay
+        reloadWorkItem = DispatchWorkItem { [weak self] in
+            print("🔥 Hot reload: HTML file changed, reloading WebView...")
+            self?.reloadWebView()
+        }
+        
+        // Execute after a short delay to debounce multiple file events
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: reloadWorkItem!)
+    }
+    
+    private func reloadWebView() {
+        guard let webView = self.webView else { return }
+        
+        // Show visual feedback during reload
+        showReloadIndicator()
+        
+        // Determine which file to load from
+        let sourceFileURL = URL(fileURLWithPath: "Sources/Examples/ExampleApp/chat.html")
+        let loadURL: URL
+        
+        if FileManager.default.fileExists(atPath: sourceFileURL.path) {
+            // Development mode - load directly from source file
+            loadURL = sourceFileURL
+        } else {
+            // Production mode - load from bundled resource
+            guard let bundledURL = Bundle.module.url(forResource: "chat", withExtension: "html") else {
+                print("❌ Hot reload: Could not find HTML file to reload")
+                return
+            }
+            loadURL = bundledURL
+        }
+        
+        do {
+            let htmlContent = try String(contentsOf: loadURL)
+            webView.loadHTMLString(htmlContent, baseURL: loadURL.deletingLastPathComponent())
+            print("✅ Hot reload: WebView reloaded with updated HTML from \(loadURL.lastPathComponent)")
+        } catch {
+            print("❌ Hot reload: Error reloading HTML: \(error)")
+        }
+    }
+    
+    private func showReloadIndicator() {
+        // Briefly flash the WebView to indicate reload
+        guard let webView = self.webView else { return }
+        
+        let script = """
+        (function() {
+            const indicator = document.createElement('div');
+            indicator.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background: rgba(0, 200, 0, 0.8);
+                color: white;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                z-index: 10000;
+                font-family: monospace;
+            `;
+            indicator.textContent = '🔥 Hot reloaded';
+            document.body.appendChild(indicator);
+            
+            setTimeout(() => {
+                indicator.style.opacity = '0';
+                indicator.style.transition = 'opacity 0.5s';
+                setTimeout(() => {
+                    document.body.removeChild(indicator);
+                }, 500);
+            }, 1000);
+        })();
+        """
+        
+        webView.evaluateJavaScript(script) { _, error in
+            if let error = error {
+                print("⚠️ Hot reload indicator error: \(error)")
+            }
+        }
+    }
+    
+    deinit {
+        reloadWorkItem?.cancel()
+        fileWatcher?.cancel()
+        fileWatcher = nil
     }
     
     func handleUserMessage(_ message: String) {
@@ -116,334 +259,71 @@ struct WebViewWrapper: NSViewRepresentable {
         // Setup controller with webView
         controller.setup(webView: webView)
         
-        // Load the HTML content
-        let htmlContent = createChatHTML()
-        webView.loadHTMLString(htmlContent, baseURL: nil)
+        // Load the HTML content from external file
+        loadHTMLFromFile(webView: webView)
         
         return webView
+    }
+    
+    private func loadHTMLFromFile(webView: WKWebView) {
+        guard let htmlURL = Bundle.module.url(forResource: "chat", withExtension: "html") else {
+            print("❌ Could not find chat.html file, falling back to embedded HTML")
+            // Fallback to embedded HTML if file not found
+            let htmlContent = createFallbackChatHTML()
+            webView.loadHTMLString(htmlContent, baseURL: nil)
+            return
+        }
+        
+        do {
+            let htmlContent = try String(contentsOf: htmlURL)
+            webView.loadHTMLString(htmlContent, baseURL: htmlURL.deletingLastPathComponent())
+            print("✅ Loaded chat interface from external HTML file")
+        } catch {
+            print("❌ Error loading HTML file: \(error)")
+            // Fallback to embedded HTML if loading fails
+            let htmlContent = createFallbackChatHTML()
+            webView.loadHTMLString(htmlContent, baseURL: nil)
+        }
     }
     
     func updateNSView(_ nsView: WKWebView, context: Context) {
         // Updates handled via JavaScript calls
     }
     
-    private func createChatHTML() -> String {
+    private func createFallbackChatHTML() -> String {
         return """
         <!DOCTYPE html>
-        <html lang="en">
+        <html>
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>SwiftCog Chat</title>
+            <title>SwiftCog Chat - Fallback</title>
             <style>
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
+                body { 
+                    font-family: system-ui; 
+                    padding: 20px; 
+                    background: #f0f0f0; 
+                    text-align: center; 
                 }
-                
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    height: 100vh;
-                    display: flex;
-                    flex-direction: column;
-                }
-                
-                .header {
-                    background: rgba(255, 255, 255, 0.1);
-                    backdrop-filter: blur(10px);
-                    padding: 20px;
-                    text-align: center;
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-                }
-                
-                .header h1 {
-                    color: white;
-                    font-size: 24px;
-                    font-weight: 600;
-                }
-                
-                .status {
-                    color: #4ade80;
-                    font-size: 14px;
-                    margin-top: 5px;
-                }
-                
-                .chat-container {
-                    flex: 1;
-                    padding: 20px;
-                    overflow-y: auto;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 15px;
-                }
-                
-                .message {
-                    display: flex;
-                    margin-bottom: 15px;
-                }
-                
-                .message.user {
-                    justify-content: flex-end;
-                }
-                
-                .message.assistant {
-                    justify-content: flex-start;
-                }
-                
-                .message-bubble {
-                    max-width: 70%;
-                    padding: 12px 16px;
-                    border-radius: 18px;
-                    position: relative;
-                    animation: slideIn 0.3s ease-out;
-                }
-                
-                .message.user .message-bubble {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    border-bottom-right-radius: 6px;
-                }
-                
-                .message.assistant .message-bubble {
-                    background: white;
-                    color: #1f2937;
-                    border-bottom-left-radius: 6px;
-                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-                }
-                
-                .message-content {
-                    line-height: 1.4;
-                }
-                
-                .message-time {
-                    font-size: 11px;
-                    opacity: 0.7;
-                    margin-top: 6px;
-                }
-                
-                .message.user .message-time {
-                    text-align: right;
-                }
-                
-                .input-container {
-                    background: rgba(255, 255, 255, 0.1);
-                    backdrop-filter: blur(10px);
-                    padding: 20px;
-                    border-top: 1px solid rgba(255, 255, 255, 0.2);
-                }
-                
-                .input-row {
-                    display: flex;
-                    gap: 10px;
-                    align-items: center;
-                }
-                
-                .message-input {
-                    flex: 1;
-                    padding: 12px 16px;
-                    border: none;
-                    border-radius: 25px;
-                    background: white;
-                    font-size: 16px;
-                    outline: none;
-                }
-                
-                .send-button {
-                    padding: 12px 24px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    border: none;
-                    border-radius: 25px;
-                    cursor: pointer;
-                    font-weight: 600;
-                    transition: transform 0.2s;
-                }
-                
-                .send-button:hover {
-                    transform: scale(1.05);
-                }
-                
-                .send-button:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
-                    transform: none;
-                }
-                
-                .thinking {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    color: rgba(255, 255, 255, 0.8);
-                    font-style: italic;
-                    margin-bottom: 10px;
-                }
-                
-                .thinking-dots {
-                    display: flex;
-                    gap: 4px;
-                }
-                
-                .thinking-dot {
-                    width: 6px;
-                    height: 6px;
-                    background: rgba(255, 255, 255, 0.6);
-                    border-radius: 50%;
-                    animation: pulse 1.4s infinite ease-in-out;
-                }
-                
-                .thinking-dot:nth-child(1) { animation-delay: 0s; }
-                .thinking-dot:nth-child(2) { animation-delay: 0.16s; }
-                .thinking-dot:nth-child(3) { animation-delay: 0.32s; }
-                
-                @keyframes slideIn {
-                    from {
-                        opacity: 0;
-                        transform: translateY(20px);
-                    }
-                    to {
-                        opacity: 1;
-                        transform: translateY(0);
-                    }
-                }
-                
-                @keyframes pulse {
-                    0%, 80%, 100% {
-                        transform: scale(0);
-                        opacity: 0.5;
-                    }
-                    40% {
-                        transform: scale(1);
-                        opacity: 1;
-                    }
-                }
-                
-                .welcome-message {
-                    text-align: center;
-                    color: rgba(255, 255, 255, 0.8);
-                    margin: 40px 0;
-                }
-                
-                .welcome-message h2 {
-                    font-size: 28px;
-                    margin-bottom: 10px;
-                }
-                
-                .welcome-message p {
-                    font-size: 16px;
-                    opacity: 0.8;
-                }
+                .error { color: #e74c3c; margin: 20px 0; }
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>🧠 SwiftCog Chat</h1>
-                <div class="status">● Connected</div>
+            <h1>🧠 SwiftCog Chat</h1>
+            <div class="error">
+                <p>Error: Could not load chat interface from external file.</p>
+                <p>Please check that chat.html is properly included in the bundle.</p>
             </div>
-            
-            <div class="chat-container" id="chatContainer">
-                <div class="welcome-message">
-                    <h2>Welcome to SwiftCog!</h2>
-                    <p>Your AI-powered cognitive assistant is ready to help.</p>
-                </div>
-            </div>
-            
-            <div class="input-container">
-                <div class="input-row">
-                    <input type="text" class="message-input" id="messageInput" placeholder="Type your message..." />
-                    <button class="send-button" id="sendButton">Send</button>
-                </div>
-            </div>
-            
             <script>
-                const chatContainer = document.getElementById('chatContainer');
-                const messageInput = document.getElementById('messageInput');
-                const sendButton = document.getElementById('sendButton');
-                let isWaiting = false;
-                
+                // Minimal fallback functions
                 function addMessage(content, isUser) {
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
-                    
-                    const now = new Date();
-                    const timeString = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                    
-                    messageDiv.innerHTML = `
-                        <div class="message-bubble">
-                            <div class="message-content">${content}</div>
-                            <div class="message-time">${timeString}</div>
-                        </div>
-                    `;
-                    
-                    chatContainer.appendChild(messageDiv);
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                    
-                    // Remove welcome message on first real message
-                    const welcomeMsg = chatContainer.querySelector('.welcome-message');
-                    if (welcomeMsg) {
-                        welcomeMsg.remove();
-                    }
+                    console.log('Message:', content, 'isUser:', isUser);
                 }
-                
-                function showThinking() {
-                    const thinkingDiv = document.createElement('div');
-                    thinkingDiv.className = 'thinking';
-                    thinkingDiv.id = 'thinking';
-                    thinkingDiv.innerHTML = `
-                        🤔 SwiftCog is thinking
-                        <div class="thinking-dots">
-                            <div class="thinking-dot"></div>
-                            <div class="thinking-dot"></div>
-                            <div class="thinking-dot"></div>
-                        </div>
-                    `;
-                    chatContainer.appendChild(thinkingDiv);
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                }
-                
-                function hideThinking() {
-                    const thinking = document.getElementById('thinking');
-                    if (thinking) {
-                        thinking.remove();
-                    }
-                }
-                
-                function sendMessage() {
-                    const message = messageInput.value.trim();
-                    if (!message || isWaiting) return;
-                    
-                    addMessage(message, true);
-                    messageInput.value = '';
-                    isWaiting = true;
-                    sendButton.disabled = true;
-                    showThinking();
-                    
-                    // Send to Swift
-                    window.webkit.messageHandlers.messageHandler.postMessage(message);
-                }
-                
-                messageInput.addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') {
-                        sendMessage();
-                    }
-                });
-                
-                sendButton.addEventListener('click', sendMessage);
-                
-                // Function to be called from Swift
                 function addAIResponse(response) {
-                    hideThinking();
-                    addMessage(response, false);
-                    isWaiting = false;
-                    sendButton.disabled = false;
-                    messageInput.focus();
+                    console.log('AI Response:', response);
                 }
-                
-                // Focus input on load
-                window.addEventListener('load', function() {
-                    messageInput.focus();
-                });
+                // Minimal message handler
+                window.webkit && window.webkit.messageHandlers && 
+                window.webkit.messageHandlers.messageHandler && 
+                console.log('Message handler available');
             </script>
         </body>
         </html>
@@ -466,9 +346,10 @@ struct WebChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             WebViewWrapper(controller: controller, onMessageSent: onMessageSent)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("SwiftCog Chat")
-        .frame(minWidth: 800, minHeight: 600)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     func addMessage(_ content: String, isUser: Bool) {

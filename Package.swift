@@ -29,7 +29,8 @@ let package = Package(
         .target(
             name: "Examples",
             dependencies: ["SwiftCogCore"],
-            path: "Sources/Examples"
+            path: "Sources/Examples",
+            resources: [.process("ExampleApp/chat.html")]
         ),
         .executableTarget(
             name: "SwiftCog",

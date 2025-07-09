@@ -161,9 +161,7 @@ public class ExampleApp: SwiftCogApp {
         print("🎯 ExampleApp: Stored chatView reference: \(chatController)")
         
         // Create and launch the SwiftUI window
-        let contentView = NavigationView {
-            chatController.view
-        }
+        let contentView = chatController.view
         
         DispatchQueue.main.async {
             let hostingController = NSHostingController(rootView: contentView)
@@ -172,6 +170,7 @@ public class ExampleApp: SwiftCogApp {
             window.title = "SwiftCog Chat"
             window.setContentSize(NSSize(width: 1000, height: 700))
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.minSize = NSSize(width: 400, height: 300)
             window.center()
             window.makeKeyAndOrderFront(nil)
             
