@@ -16,29 +16,29 @@ public class KernelSystem {
         }
     }
 
-    public func createExpressionKernel() async throws -> ExpressionKernel {
-        let kernel = ExpressionKernel(actorSystem: actorSystem, system: self)
+    public func createExpressionKernel(customHandler: ((KernelMessage, ExpressionKernel) async throws -> Void)? = nil) async throws -> ExpressionKernel {
+        let kernel = ExpressionKernel(actorSystem: actorSystem, system: self, customHandler: customHandler)
         let kernelId = try await kernel.getKernelId()
         kernels[kernelId] = kernel
         return kernel
     }
 
-    public func createMotorKernel() async throws -> MotorKernel {
-        let kernel = MotorKernel(actorSystem: actorSystem, system: self)
+    public func createMotorKernel(customHandler: ((KernelMessage, MotorKernel) async throws -> Void)? = nil) async throws -> MotorKernel {
+        let kernel = MotorKernel(actorSystem: actorSystem, system: self, customHandler: customHandler)
         let kernelId = try await kernel.getKernelId()
         kernels[kernelId] = kernel
         return kernel
     }
 
-    public func createExecutiveKernel() async throws -> ExecutiveKernel {
-        let kernel = ExecutiveKernel(actorSystem: actorSystem, system: self)
+    public func createExecutiveKernel(customHandler: ((KernelMessage, ExecutiveKernel) async throws -> Void)? = nil) async throws -> ExecutiveKernel {
+        let kernel = ExecutiveKernel(actorSystem: actorSystem, system: self, customHandler: customHandler)
         let kernelId = try await kernel.getKernelId()
         kernels[kernelId] = kernel
         return kernel
     }
 
-    public func createSensingKernel() async throws -> SensingKernel {
-        let kernel = SensingKernel(actorSystem: actorSystem, system: self, apiKey: apiKey)
+    public func createSensingKernel(customHandler: ((KernelMessage, SensingKernel) async throws -> Void)? = nil) async throws -> SensingKernel {
+        let kernel = SensingKernel(actorSystem: actorSystem, system: self, apiKey: apiKey, customHandler: customHandler)
         let kernelId = try await kernel.getKernelId()
         kernels[kernelId] = kernel
         sensingKernels.append(kernel)
