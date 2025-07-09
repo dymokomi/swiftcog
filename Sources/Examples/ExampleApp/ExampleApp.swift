@@ -22,7 +22,7 @@ public class ExampleApp: SwiftCogApp {
         self.system = system
         self.llmService = llmService
     }
-    
+
     /// Initialize ExampleApp for backend mode with core cognitive kernels
     public static func initBackend(system: KernelSystem) async throws -> Self {
         guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] else {
@@ -31,36 +31,15 @@ public class ExampleApp: SwiftCogApp {
         
         let openAIProvider = OpenAIProvider(apiKey: apiKey)
         let llmService = LLMService(provider: openAIProvider)
-        
         let app = ExampleApp(system: system, llmService: llmService)
-        try await app.setupBackendKernels()
         
-        return app as! Self
-    }
-    
-    /// Initialize ExampleApp for frontend mode with interface kernels
-    public static func initFrontend(system: KernelSystem) async throws -> Self {
-        guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] else {
-            throw NSError(domain: "ExampleApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY environment variable not set"])
-        }
-        
-        let openAIProvider = OpenAIProvider(apiKey: apiKey)
-        let llmService = LLMService(provider: openAIProvider)
-        
-        let app = ExampleApp(system: system, llmService: llmService)
-        try await app.setupFrontendKernels()
-        
-        return app as! Self
-    }
-    
-    private func setupBackendKernels() async throws {
         print("ExampleApp: Initializing backend kernels...")
         
         // Create SensingKernel (no custom handler needed - will be connected from frontend)
-        self.sensingKernel = try await system.createSensingKernel()
+        app.sensingKernel = try await system.createSensingKernel()
         
         // Create ExpressionKernel with custom handler that sends back to frontend
-        self.expressionKernel = try await system.createExpressionKernel { message, kernel in
+        app.expressionKernel = try await system.createExpressionKernel { message, kernel in
             print("Backend ExpressionKernel: \(message.payload)")
             
             // Format the message for frontend display
@@ -70,17 +49,17 @@ public class ExampleApp: SwiftCogApp {
             )
             
             // Send the formatted response back to frontend
-            try await self.system.emit(message: formattedMessage, from: kernel)
+            try await app.system.emit(message: formattedMessage, from: kernel)
         }
         
         // Create MotorKernel with custom handler
-        self.motorKernel = try await system.createMotorKernel { message, kernel in
+        app.motorKernel = try await system.createMotorKernel { message, kernel in
             print("Backend MotorKernel: Processing \(message.payload)")
-            try await self.system.emit(message: message, from: kernel)
+            try await app.system.emit(message: message, from: kernel)
         }
         
         // Create ExecutiveKernel with custom handler that calls LLM
-        self.executiveKernel = try await system.createExecutiveKernel { [llmService = self.llmService] message, kernel in
+        app.executiveKernel = try await system.createExecutiveKernel { [llmService = app.llmService] message, kernel in
             do {
                 // Define custom system prompt for the executive decision-making
                 let systemPrompt = """
@@ -102,39 +81,52 @@ public class ExampleApp: SwiftCogApp {
                 )
                 
                 // Emit the AI-processed message to the next kernel
-                try await self.system.emit(message: processedMessage, from: kernel)
+                try await app.system.emit(message: processedMessage, from: kernel)
                 
             } catch {
                 print("Error calling LLM: \(error.localizedDescription)")
                 // If LLM fails, pass through the original message
-                try await self.system.emit(message: message, from: kernel)
+                try await app.system.emit(message: message, from: kernel)
             }
         }
         
         // Connect the backend kernels to form the pipeline
-        try await system.connect(from: self.sensingKernel!, to: self.executiveKernel!)
-        try await system.connect(from: self.executiveKernel!, to: self.motorKernel!)
-        try await system.connect(from: self.motorKernel!, to: self.expressionKernel!)
+        try await system.connect(from: app.sensingKernel!, to: app.executiveKernel!)
+        try await system.connect(from: app.executiveKernel!, to: app.motorKernel!)
+        try await system.connect(from: app.motorKernel!, to: app.expressionKernel!)
         
         print("ExampleApp: Backend kernel pipeline established")
+        
+        return app as! Self
     }
     
-    private func setupFrontendKernels() async throws {
+    /// Initialize ExampleApp for frontend mode with interface kernels
+    public static func initFrontend(system: KernelSystem) async throws -> Self {
+        guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] else {
+            throw NSError(domain: "ExampleApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY environment variable not set"])
+        }
+        
+        let openAIProvider = OpenAIProvider(apiKey: apiKey)
+        let llmService = LLMService(provider: openAIProvider)
+        let app = ExampleApp(system: system, llmService: llmService)
+        
         print("ExampleApp: Initializing frontend interface kernels...")
         
         // Create SensingInterfaceKernel for speech input
-        self.sensingInterfaceKernel = try await system.createSensingInterfaceKernel { message, kernel in
+        app.sensingInterfaceKernel = try await system.createSensingInterfaceKernel { message, kernel in
             print("Frontend SensingInterfaceKernel: Got speech input: \(message.payload)")
         }
         
         // Create ExpressionInterfaceKernel for output display
-        self.expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { message, kernel in
+        app.expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { message, kernel in
             print("AI Response: \(message.payload)")
             // In a real UI app, this would update the interface with the response
         }
         
         print("ExampleApp: Frontend interface kernels created")
         print("ExampleApp: Frontend setup complete - will connect to backend when TCP client starts")
+        
+        return app as! Self
     }
 }
 

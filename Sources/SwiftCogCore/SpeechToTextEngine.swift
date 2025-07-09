@@ -85,9 +85,7 @@ public class SpeechToTextEngine {
               let eventType = json["type"] as? String else {
             return
         }
-        
-        //print("SpeechToTextEngine: Received event: \(eventType)")
-        
+
         switch eventType {
         case "session.created":
             print("SpeechToTextEngine: Session created, sending configuration...")

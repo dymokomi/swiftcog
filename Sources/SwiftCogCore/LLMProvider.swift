@@ -1,7 +1,6 @@
 import Foundation
 
-// MARK: - LLM Provider Protocol
-
+// LLM Provider Protocol
 public protocol LLMProvider {
     func generateCompletion(
         systemPrompt: String,
@@ -11,8 +10,7 @@ public protocol LLMProvider {
     ) async throws -> String
 }
 
-// MARK: - LLM Message Models
-
+// LLM Message Models
 public struct LLMMessage: Codable {
     let role: String
     let content: String
@@ -45,8 +43,7 @@ public struct LLMResponse: Codable {
     let choices: [LLMChoice]
 }
 
-// MARK: - OpenAI Provider Implementation
-
+// OpenAI Provider Implementation
 public class OpenAIProvider: LLMProvider {
     private let apiKey: String
     private let baseURL: String
@@ -107,8 +104,7 @@ public class OpenAIProvider: LLMProvider {
     }
 }
 
-// MARK: - Local LLM Provider (Placeholder for future implementation)
-
+// Local LLM Provider (Placeholder for future implementation)
 public class LocalLLMProvider: LLMProvider {
     private let endpoint: String
     
@@ -128,8 +124,7 @@ public class LocalLLMProvider: LLMProvider {
     }
 }
 
-// MARK: - LLM Service
-
+// LLM Service
 public class LLMService {
     private let provider: LLMProvider
     
@@ -152,8 +147,7 @@ public class LLMService {
     }
 }
 
-// MARK: - Error Types
-
+// Error Types
 public enum LLMError: Error, LocalizedError {
     case invalidResponse
     case apiError(statusCode: Int, message: String)
