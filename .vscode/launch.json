@@ -17,6 +17,42 @@
             "name": "Release swiftcog",
             "program": "${workspaceFolder:swiftcog}/.build/release/swiftcog",
             "preLaunchTask": "swift: Build Release swiftcog"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Debug example-app",
+            "program": "${workspaceFolder:swiftcog}/.build/debug/example-app",
+            "preLaunchTask": "swift: Build Debug example-app"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Release example-app",
+            "program": "${workspaceFolder:swiftcog}/.build/release/example-app",
+            "preLaunchTask": "swift: Build Release example-app"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Debug SwiftCog",
+            "program": "${workspaceFolder:swiftcog}/.build/debug/SwiftCog",
+            "preLaunchTask": "swift: Build Debug SwiftCog"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:swiftcog}",
+            "name": "Release SwiftCog",
+            "program": "${workspaceFolder:swiftcog}/.build/release/SwiftCog",
+            "preLaunchTask": "swift: Build Release SwiftCog"
         }
     ]
 }
