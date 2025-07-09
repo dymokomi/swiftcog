@@ -28,15 +28,15 @@ let package = Package(
             ]
         ),
         .target(
-            name: "ExampleApp",
+            name: "Examples",
             dependencies: ["SwiftCogCore"],
-            path: "Sources/ExampleApp"
+            path: "Sources/Examples"
         ),
         .executableTarget(
             name: "SwiftCog",
             dependencies: [
                 "SwiftCogCore",
-                "ExampleApp",
+                "Examples",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "DotEnv", package: "DotEnv")
             ],

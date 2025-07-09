@@ -1,6 +1,6 @@
 import Foundation
 import SwiftCogCore
-import ExampleApp
+import Examples
 import Distributed
 import ArgumentParser
 import DistributedCluster
@@ -19,7 +19,7 @@ extension SwiftCog {
     struct Run: AsyncParsableCommand {
         static var configuration = CommandConfiguration(commandName: "run", abstract: "Run an application.")
 
-        @Argument(help: "The path to the application to run (currently ignored).")
+        @Argument(help: "The path to the application directory to run, or app name if using built-in apps.")
         var appPath: String?
         
         @Option(name: .long, help: "The OpenAI API key. If not provided, it will be read from the OPENAI_API_KEY environment variable.")
@@ -32,11 +32,32 @@ extension SwiftCog {
                 fatalError("Missing OpenAI API Key. Please provide it using the --api-key option or the OPENAI_API_KEY environment variable.")
             }
 
-            let system = try await KernelSystem(apiKey: finalApiKey)
-            // The app's initializer is responsible for setting up the architecture.
-            _ = try await ExampleApp(system: system)
+            // Initialize example apps registry
+            Examples.initialize()
             
-            print("SwiftCog system starting...")
+            let system = try await KernelSystem(apiKey: finalApiKey)
+            
+            // Determine which app to load
+            let app: SwiftCogApp
+            if let appPath = appPath {
+                // Check if it's a directory path or an app name
+                if FileManager.default.fileExists(atPath: appPath) {
+                    // It's a directory path, try to load from path
+                    print("Loading app from directory: \(appPath)")
+                    app = try await AppLoader.loadApp(from: appPath, system: system)
+                } else {
+                    // It's an app name, try to load from registry
+                    print("Loading app by name: \(appPath)")
+                    app = try await AppLoader.loadApp(named: appPath, system: system)
+                }
+            } else {
+                // No app specified, list available apps and load ExampleApp as default
+                print("No app specified. Available apps: \(AppRegistry.availableApps.joined(separator: ", "))")
+                print("Loading default app: ExampleApp")
+                app = try await AppLoader.loadApp(named: "ExampleApp", system: system)
+            }
+            
+            print("SwiftCog system starting with app: \(type(of: app))...")
 
             // The KernelSystem is responsible for running the application.
             let tasks = system.run()

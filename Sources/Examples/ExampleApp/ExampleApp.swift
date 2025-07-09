@@ -2,7 +2,10 @@ import Foundation
 import SwiftCogCore
 import Distributed
 
-public class ExampleApp {
+public class ExampleApp: SwiftCogApp {
+    public static let appName = "ExampleApp"
+    public static let appDescription = "A simple example cognitive architecture application"
+    
     let system: KernelSystem
     let sensingKernel: SensingKernel
     let executiveKernel: ExecutiveKernel
@@ -52,4 +55,11 @@ public class ExampleApp {
         try await system.connect(from: self.executiveKernel, to: self.motorKernel)
         try await system.connect(from: self.motorKernel, to: self.expressionKernel)
     }
-} 
+}
+
+// Register the app with the registry
+extension ExampleApp {
+    public static func register() {
+        AppRegistry.register(name: appName, type: ExampleApp.self)
+    }
+}
