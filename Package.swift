@@ -48,10 +48,10 @@ let package = Package(
         .executableTarget(
             name: "SwiftCogGUI",
             dependencies: [
-                "SwiftCogCore",
-                "Examples"
+                "SwiftCogCore"
             ],
-            path: "Sources/SwiftCogGUI"
+            path: "Sources/SwiftCogGUI",
+            resources: [.process("Resources/chat.html")]
         ),
     ]
 )

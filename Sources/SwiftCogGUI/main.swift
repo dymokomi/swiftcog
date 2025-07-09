@@ -1,32 +1,35 @@
 import AppKit
 import SwiftUI
 import SwiftCogCore
-import Examples
+// Import our local views
 
-class SwiftCogGUIApp: NSObject, NSApplicationDelegate {
+class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private var window: NSWindow?
-    private var exampleApp: ExampleApp?
+    private var chatController: ChatController?
+    private var sensingInterfaceKernel: SensingInterfaceKernel?
+    private var expressionInterfaceKernel: ExpressionInterfaceKernel?
+    private var system: KernelSystem?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure the application
         NSApp.setActivationPolicy(.regular)
         
-        // Initialize the frontend app
+        // Initialize the GUI app
         Task {
             do {
                 // Create kernel system for frontend mode
                 let system = KernelSystem(apiKey: getAPIKey(), mode: .frontend, host: "127.0.0.1", port: 8080)
+                self.system = system
                 
-                // Initialize the frontend app
-                let app = try await ExampleApp.initFrontend(system: system)
-                self.exampleApp = app
+                // Create interface kernels directly in GUI
+                try await self.createInterfaceKernels(system: system)
                 
                 // Start the kernel system background tasks
                 let _ = system.run()
                 
                 // Launch the chat window on the main thread
                 await MainActor.run {
-                    self.createWindow(with: app)
+                    self.createWindow()
                 }
                 
                 print("SwiftCog GUI app started successfully!")
@@ -39,21 +42,62 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate {
         }
     }
     
+    private func createInterfaceKernels(system: KernelSystem) async throws {
+        // Create SensingInterfaceKernel for user input
+        sensingInterfaceKernel = try await system.createSensingInterfaceKernel(
+            customHandler: { message, kernel in
+                print("GUI SensingInterfaceKernel: Got user input: \(message.payload)")
+            },
+            speechInputCallback: { [weak self] speechText in
+                print("🎯 GUI: Speech input: '\(speechText)'")
+                // Handle speech input directly in GUI
+                DispatchQueue.main.async {
+                    self?.chatController?.handleUserMessage(speechText)
+                }
+            }
+        )
+        
+        // Create ExpressionInterfaceKernel for display commands
+        expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { [weak self] message, kernel in
+            print("🎯 GUI: Received display message: '\(message.payload)'")
+            
+            // Parse display commands from backend
+            let displayCommand = self?.parseDisplayCommand(message.payload)
+            
+            if let displayCommand = displayCommand {
+                DispatchQueue.main.async {
+                    self?.chatController?.handleDisplayCommand(displayCommand)
+                }
+            }
+        }
+    }
+    
+    private func parseDisplayCommand(_ payload: String) -> DisplayCommand? {
+        // Simple parsing - in practice you might use JSON
+        if payload.hasPrefix("SwiftCog Response: ") {
+            let message = String(payload.dropFirst("SwiftCog Response: ".count))
+            return ShowMessageCommand(message: message, isUser: false)
+        } else {
+            // For any other message, treat it as a display message
+            return ShowMessageCommand(message: payload, isUser: false)
+        }
+    }
+    
     @MainActor
-    private func createWindow(with app: ExampleApp) {
-        let chatController = WebChatController { userMessage in
+    private func createWindow() {
+        let chatController = ChatController { userMessage in
             Task {
                 // Send user message through the sensing interface kernel
                 let message = KernelMessage(sourceKernelId: .sensingInterface, payload: userMessage)
-                try? await app.system.emit(message: message, from: app.sensingInterfaceKernel!)
+                try? await self.system?.emit(message: message, from: self.sensingInterfaceKernel!)
             }
         }
         
-        // Store reference for AI responses
-        app.chatController = chatController
+        // Store reference for display commands
+        self.chatController = chatController
         
         // Create the SwiftUI content view
-        let contentView = chatController.view
+        let contentView = ChatView(controller: chatController)
         
         // Create the hosting controller and window
         let hostingController = NSHostingController(rootView: contentView)

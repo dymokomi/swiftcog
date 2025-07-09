@@ -3,17 +3,16 @@ import Examples
 import ArgumentParser
 import DotEnv
 import Foundation
-import AppKit
 
 @main
 struct SwiftCogCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "swiftcog",
-        abstract: "SwiftCog - Cognitive AI System with separated frontend/backend processes"
+        abstract: "SwiftCog Backend - Cognitive AI System backend server"
     )
     
-    @Option(name: .shortAndLong, help: "Specify backend or frontend mode")
-    var mode: AppMode = .backend
+    // Removed mode option - this CLI is backend-only now
+    // Use SwiftCogGUI for frontend
     
     @Option(name: .long, help: "TCP host")
     var host: String = "127.0.0.1"
@@ -33,64 +32,39 @@ struct SwiftCogCLI: AsyncParsableCommand {
             throw ExitCode.failure
         }
         
-        print("Starting SwiftCog in \(mode.rawValue) mode")
+        print("Starting SwiftCog in backend mode")
         print("TCP: \(host):\(port)")
         
         // Create kernel system with TCP configuration
-        let system = KernelSystem(apiKey: apiKey, mode: mode, host: host, port: port)
+        let system = KernelSystem(apiKey: apiKey, mode: .backend, host: host, port: port)
         
         do {
             // Create and run the app based on mode
-            if mode == .backend {
-                let _ = try await ExampleApp.initBackend(system: system)
-                let tasks = system.run()
-                print("Backend running - listening for TCP connections")
-                
-                // Wait for any task to complete or fail
-                try await withThrowingTaskGroup(of: Void.self) { group in
-                    for task in tasks {
-                        group.addTask {
-                            try await task.value
-                        }
-                    }
-                    
-                    // For backend, just wait indefinitely (until manually stopped)
-                    let infiniteTask = Task {
-                        while true {
-                            try await Task.sleep(for: .seconds(1))
-                        }
-                    }
-                    
+            let _ = try await ExampleApp.initBackend(system: system)
+            let tasks = system.run()
+            print("Backend running - listening for TCP connections")
+            
+            // Wait for any task to complete or fail
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for task in tasks {
                     group.addTask {
-                        try await infiniteTask.value
-                    }
-                    
-                    // Wait for the first task to complete (which should never happen for backend)
-                    try await group.next()
-                }
-            } else {
-                let app = try await ExampleApp.initFrontend(system: system)
-                let tasks = system.run()
-                print("Frontend starting - connecting to backend and launching chat window")
-                
-                // Launch the SwiftUI chat window
-                app.launchChatWindow()
-                
-                // Wait for all frontend tasks to complete
-                try await withThrowingTaskGroup(of: Void.self) { group in
-                    for task in tasks {
-                        group.addTask {
-                            try await task.value
-                        }
-                    }
-                    
-                    // Wait for all tasks to complete
-                    for try await _ in group {
-                        // Tasks completed
+                        try await task.value
                     }
                 }
                 
-                print("Frontend session completed")
+                // For backend, just wait indefinitely (until manually stopped)
+                let infiniteTask = Task {
+                    while true {
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                }
+                
+                group.addTask {
+                    try await infiniteTask.value
+                }
+                
+                // Wait for the first task to complete (which should never happen for backend)
+                try await group.next()
             }
         } catch {
             print("Error: \(error)")

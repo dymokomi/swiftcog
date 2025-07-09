@@ -42,17 +42,7 @@ public class SensingInterfaceKernel: Kernel {
         // Notify the UI about the speech input first
         speechInputCallback?(speechText)
         
-        let message = KernelMessage(
-            id: UUID(),
-            sourceKernelId: .sensingInterface,
-            payload: speechText
-        )
-        
-        // Send to backend via TCP
-        do {
-            try await system.emit(message: message, from: self)
-        } catch {
-            print("Failed to send speech to backend: \(error)")
-        }
+        // Message sending is handled by the UI callback
+        // The speechInputCallback will trigger the UI to send the message to backend
     }
 } 

@@ -1,29 +1,18 @@
 import Foundation
 import SwiftCogCore
-import SwiftUI
-import AppKit
-import WebKit
 
-public class ExampleApp: SwiftCogApp {
+public class ExampleApp {
     public static let appName = "ExampleApp"
     public static let appDescription = "A simple example cognitive architecture application"
     
     public var system: KernelSystem
     public var llmService: LLMService
     
-    // Backend kernels
+    // Backend kernels only
     private var sensingKernel: SensingKernel?
     private var executiveKernel: ExecutiveKernel?
     private var motorKernel: MotorKernel?
     private var expressionKernel: ExpressionKernel?
-    
-    // Frontend interface kernels
-    public var sensingInterfaceKernel: SensingInterfaceKernel?
-    public var expressionInterfaceKernel: ExpressionInterfaceKernel?
-    
-    // Frontend chat controller
-    public var chatController: WebChatController?
-    private var mainWindow: NSWindow?
 
     private init(system: KernelSystem, llmService: LLMService) {
         self.system = system
@@ -107,106 +96,4 @@ public class ExampleApp: SwiftCogApp {
         return app as! Self
     }
     
-    /// Initialize ExampleApp for frontend mode with interface kernels
-    public static func initFrontend(system: KernelSystem) async throws -> Self {
-        guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] else {
-            throw NSError(domain: "ExampleApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY environment variable not set"])
-        }
-        
-        let openAIProvider = OpenAIProvider(apiKey: apiKey)
-        let llmService = LLMService(provider: openAIProvider)
-        let app = ExampleApp(system: system, llmService: llmService)
-        
-        print("ExampleApp: Initializing frontend interface kernels...")
-        
-        // Create SensingInterfaceKernel for user input
-        app.sensingInterfaceKernel = try await system.createSensingInterfaceKernel(
-            customHandler: { message, kernel in
-                print("Frontend SensingInterfaceKernel: Got user input: \(message.payload)")
-            },
-            speechInputCallback: { [weak app] speechText in
-                print("🎯 ExampleApp: Speech input callback: '\(speechText)'")
-                // Add the user's speech to the chat interface
-                app?.chatController?.addMessage(speechText, isUser: true)
-            }
-        )
-        
-        // Create ExpressionInterfaceKernel for AI responses
-        app.expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { [weak app] message, kernel in
-            print("🎯 ExampleApp: ExpressionInterfaceKernel received message: '\(message.payload)'")
-            // Extract the AI response from the formatted message
-            let response = message.payload.replacingOccurrences(of: "SwiftCog Response: ", with: "")
-            print("🎯 ExampleApp: Extracted response: '\(response)'")
-            Task { @MainActor in
-                print("🎯 ExampleApp: Updating chat view with response")
-                app?.chatController?.addMessage(response, isUser: false)
-            }
-        }
-        
-        print("ExampleApp: Frontend interface kernels created")
-        
-        return app as! Self
-    }
-    
-    /// Launch the SwiftUI chat window for frontend mode
-    public func launchChatWindow() {
-        let chatController = WebChatController { userMessage in
-            Task {
-                // Send user message through the sensing interface kernel
-                let message = KernelMessage(sourceKernelId: .sensingInterface, payload: userMessage)
-                try? await self.system.emit(message: message, from: self.sensingInterfaceKernel!)
-            }
-        }
-        
-        // Store reference to chat view for AI responses
-        self.chatController = chatController
-        print("🎯 ExampleApp: Stored chatView reference: \(chatController)")
-        
-        // Create and launch the SwiftUI window
-        let contentView = chatController.view
-        
-        DispatchQueue.main.async {
-            let hostingController = NSHostingController(rootView: contentView)
-            let window = NSWindow(contentViewController: hostingController)
-            
-            // Keep a strong reference to the window
-            self.mainWindow = window
-
-            window.title = "SwiftCog Chat"
-            window.setContentSize(NSSize(width: 1000, height: 700))
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.minSize = NSSize(width: 400, height: 300)
-            window.isRestorable = false
-            window.tabbingMode = .disallowed
-            
-            // Explicitly enable window controls
-            window.standardWindowButton(.closeButton)?.isEnabled = true
-            window.standardWindowButton(.miniaturizeButton)?.isEnabled = true
-            window.standardWindowButton(.zoomButton)?.isEnabled = true
-            
-            // Ensure the window can receive events properly
-            window.acceptsMouseMovedEvents = true
-            window.isMovableByWindowBackground = false
-            
-            // Properly activate the application so the window becomes interactive
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            
-            window.center()
-            window.makeKeyAndOrderFront(nil)
-            
-            // Force the window to become the key window and accept events
-            window.makeKey()
-            NSApp.activate(ignoringOtherApps: true)
-            
-            print("ExampleApp: SwiftUI chat window launched!")
-        }
-    }
-}
-
-// Register the app with the registry
-extension ExampleApp {
-    public static func register() {
-        AppRegistry.register(name: appName, type: ExampleApp.self)
-    }
 }

@@ -5,7 +5,8 @@ import SwiftCogCore
 public enum Examples {
     /// Initialize all example applications (register them with the app registry)
     public static func initialize() {
-        ExampleApp.register()
+        // Registration no longer needed - ExampleApp is now backend-only
+        // Frontend functionality moved to SwiftCogGUI
     }
     
     /// Get a list of all available example apps
