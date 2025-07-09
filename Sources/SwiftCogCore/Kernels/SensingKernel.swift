@@ -17,8 +17,6 @@ public class SensingKernel: Kernel {
     }
 
     public func receive(message: KernelMessage) async throws {
-        print("🧠 SensingKernel (Backend) received message: '\(message.payload)'")
-        
         // Backend sensing: Just processes the message without speech recognition
         if let customHandler = customHandler {
             try await customHandler(message, self)

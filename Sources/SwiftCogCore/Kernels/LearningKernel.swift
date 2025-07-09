@@ -12,6 +12,6 @@ public class LearningKernel: Kernel {
 
     public func receive(message: KernelMessage) async throws {
         // Not implemented yet
-        print("📚 LearningKernel received message: '\(message.payload)'")
+        print("LearningKernel received message: '\(message.payload)'")
     }
 } 

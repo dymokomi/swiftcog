@@ -15,8 +15,6 @@ public class ExpressionInterfaceKernel: Kernel {
     }
 
     public func receive(message: KernelMessage) async throws {
-        print("📺 ExpressionInterfaceKernel (Frontend) received message: '\(message.payload)'")
-        
         if let customHandler = customHandler {
             try await customHandler(message, self)
         } else {
@@ -26,7 +24,7 @@ public class ExpressionInterfaceKernel: Kernel {
     
     private func defaultHandler(message: KernelMessage) async throws {
         // Frontend expression interface: Display the message from backend
-        print("💬 Displaying to user: \(message.payload)")
+        print("Displaying to user: \(message.payload)")
         
         // Could also trigger UI updates, text-to-speech, etc.
         // For now, just print the response

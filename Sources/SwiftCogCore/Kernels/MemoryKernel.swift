@@ -12,6 +12,6 @@ public class MemoryKernel: Kernel {
 
     public func receive(message: KernelMessage) async throws {
         // Not implemented yet
-        print("🧠 MemoryKernel received message: '\(message.payload)'")
+        print("MemoryKernel received message: '\(message.payload)'")
     }
 } 

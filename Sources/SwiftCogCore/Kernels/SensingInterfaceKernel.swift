@@ -18,18 +18,16 @@ public class SensingInterfaceKernel: Kernel {
     }
 
     public func receive(message: KernelMessage) async throws {
-        print("🎙️ SensingInterfaceKernel (Frontend) received message: '\(message.payload)'")
-        
         if let customHandler = customHandler {
             try await customHandler(message, self)
         } else {
             // Default: Display the response from backend
-            print("🗣️ Response from backend: \(message.payload)")
+            print("Response from backend: \(message.payload)")
         }
     }
     
     public func startSensing() async throws {
-        print("🎙️ SensingInterfaceKernel (Frontend): Starting speech recognition...")
+        print("SensingInterfaceKernel: Starting speech recognition")
         
         for try await speechText in speechEngine.start() {
             await processSpeechInput(speechText)
@@ -37,7 +35,7 @@ public class SensingInterfaceKernel: Kernel {
     }
     
     private func processSpeechInput(_ speechText: String) async {
-        print("🎤 Frontend captured speech: '\(speechText)'")
+        print("Frontend captured speech: '\(speechText)'")
         
         let message = KernelMessage(
             id: UUID(),
@@ -45,11 +43,11 @@ public class SensingInterfaceKernel: Kernel {
             payload: speechText
         )
         
-        // Send to backend via HTTP
+        // Send to backend via TCP
         do {
             try await system.emit(message: message, from: self)
         } catch {
-            print("❌ Failed to send speech to backend: \(error)")
+            print("Failed to send speech to backend: \(error)")
         }
     }
 } 

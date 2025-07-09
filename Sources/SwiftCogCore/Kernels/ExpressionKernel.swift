@@ -15,8 +15,6 @@ public class ExpressionKernel: Kernel {
     }
 
     public func receive(message: KernelMessage) async throws {
-        print("🗣️ ExpressionKernel (Backend) received message: '\(message.payload)'")
-        
         if let customHandler = customHandler {
             try await customHandler(message, self)
         } else {
@@ -29,10 +27,10 @@ public class ExpressionKernel: Kernel {
         let formattedMessage = KernelMessage(
             id: UUID(),
             sourceKernelId: .expression,
-            payload: "🧠 SwiftCog Response: \(message.payload)"
+            payload: "SwiftCog Response: \(message.payload)"
         )
         
-        // This will trigger sending to frontend via WebSocket
+        // This will trigger sending to frontend via TCP
         try await system.emit(message: formattedMessage, from: self)
     }
 } 

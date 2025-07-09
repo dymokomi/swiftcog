@@ -15,8 +15,6 @@ public class MotorKernel: Kernel {
     }
 
     public func receive(message: KernelMessage) async throws {
-        print("🏃 MotorKernel (Backend) received message: '\(message.payload)'")
-        
         if let customHandler = customHandler {
             try await customHandler(message, self)
         } else {

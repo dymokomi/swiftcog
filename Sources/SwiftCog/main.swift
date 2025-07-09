@@ -27,13 +27,13 @@ struct SwiftCogCLI: AsyncParsableCommand {
         // Check for OpenAI API key
         guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
               !apiKey.isEmpty else {
-            print("❌ Error: OPENAI_API_KEY environment variable is not set")
-            print("   Please set your OpenAI API key in the .env file or environment")
+            print("Error: OPENAI_API_KEY environment variable is not set")
+            print("Please set your OpenAI API key in the .env file or environment")
             throw ExitCode.failure
         }
         
-        print("🚀 Starting SwiftCog in \(mode.rawValue) mode...")
-        print("   TCP: \(host):\(port)")
+        print("Starting SwiftCog in \(mode.rawValue) mode")
+        print("TCP: \(host):\(port)")
         
         // Create kernel system with TCP configuration
         let system = KernelSystem(apiKey: apiKey, mode: mode, host: host, port: port)
@@ -43,7 +43,7 @@ struct SwiftCogCLI: AsyncParsableCommand {
             if mode == .backend {
                 let _ = try await ExampleApp.initBackend(system: system)
                 let tasks = system.run()
-                print("Backend running - listening for TCP connections...")
+                print("Backend running - listening for TCP connections")
                 
                 // Wait for any task to complete or fail
                 try await withThrowingTaskGroup(of: Void.self) { group in
@@ -70,7 +70,7 @@ struct SwiftCogCLI: AsyncParsableCommand {
             } else {
                 let _ = try await ExampleApp.initFrontend(system: system)
                 let tasks = system.run()
-                print("Frontend starting - connecting to backend and starting speech recognition...")
+                print("Frontend starting - connecting to backend and starting speech recognition")
                 
                 // Wait for all frontend tasks to complete
                 try await withThrowingTaskGroup(of: Void.self) { group in
@@ -89,7 +89,7 @@ struct SwiftCogCLI: AsyncParsableCommand {
                 print("Frontend session completed")
             }
         } catch {
-            print("❌ Error: \(error)")
+            print("Error: \(error)")
             try await system.shutdown()
             throw ExitCode.failure
         }

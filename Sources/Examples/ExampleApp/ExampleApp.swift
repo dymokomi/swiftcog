@@ -66,7 +66,7 @@ public class ExampleApp: SwiftCogApp {
             // Format the message for frontend display
             let formattedMessage = KernelMessage(
                 sourceKernelId: .expression,
-                payload: "🧠 SwiftCog Response: \(message.payload)"
+                payload: "SwiftCog Response: \(message.payload)"
             )
             
             // Send the formatted response back to frontend
@@ -129,12 +129,12 @@ public class ExampleApp: SwiftCogApp {
         
         // Create ExpressionInterfaceKernel for output display
         self.expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { message, kernel in
-            print("🗣️ AI Response: \(message.payload)")
+            print("AI Response: \(message.payload)")
             // In a real UI app, this would update the interface with the response
         }
         
         print("ExampleApp: Frontend interface kernels created")
-        print("ExampleApp: Frontend setup complete - will connect to backend when HTTP client starts")
+        print("ExampleApp: Frontend setup complete - will connect to backend when TCP client starts")
     }
 }
 

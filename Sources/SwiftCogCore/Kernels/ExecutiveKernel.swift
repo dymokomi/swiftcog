@@ -15,8 +15,6 @@ public class ExecutiveKernel: Kernel {
     }
 
     public func receive(message: KernelMessage) async throws {
-        print("🧠 ExecutiveKernel (Backend) received message: '\(message.payload)'")
-        
         if let customHandler = customHandler {
             try await customHandler(message, self)
         } else {

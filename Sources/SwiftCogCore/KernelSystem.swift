@@ -25,7 +25,7 @@ public class KernelSystem: AsyncMessageHandler {
                 tcpServer = try TCPServer(host: host, port: port)
                 tcpServer?.messageHandler = self
             } catch {
-                print("❌ Failed to create TCP server: \(error)")
+                print("Failed to create TCP server: \(error)")
             }
         } else {
             tcpClient = TCPClient(host: host, port: port)
@@ -39,11 +39,6 @@ public class KernelSystem: AsyncMessageHandler {
         let kernel = ExpressionKernel(system: self, customHandler: customHandler)
         let kernelId = kernel.getKernelId()
         kernels[kernelId] = kernel
-        
-        if mode == .backend {
-            print("Backend ExpressionKernel ready for TCP messages")
-        }
-        
         return kernel
     }
 
@@ -66,11 +61,6 @@ public class KernelSystem: AsyncMessageHandler {
         let kernelId = kernel.getKernelId()
         kernels[kernelId] = kernel
         sensingKernels.append(kernel)
-        
-        if mode == .backend {
-            print("Backend SensingKernel ready for TCP messages")
-        }
-        
         return kernel
     }
     
@@ -81,7 +71,6 @@ public class KernelSystem: AsyncMessageHandler {
         let kernelId = kernel.getKernelId()
         kernels[kernelId] = kernel
         sensingInterfaceKernels.append(kernel)
-        
         return kernel
     }
     
@@ -109,40 +98,22 @@ public class KernelSystem: AsyncMessageHandler {
     }
     
     public func sendToFrontend(_ message: KernelMessage) {
-        print("🔄 KernelSystem.sendToFrontend called with: '\(message.payload)'")
-        if let server = tcpServer {
-            print("🔄 TCP server exists, sending to clients...")
-            server.sendToClients(message)
-        } else {
-            print("❌ No TCP server available!")
-        }
+        tcpServer?.sendToClients(message)
     }
     
     // MARK: - AsyncMessageHandler
     
     public func handleMessage(_ message: KernelMessage) async throws {
-        print("🔄 KernelSystem.handleMessage: Received in \(mode.rawValue) mode: '\(message.payload)'")
-        
         if mode == .backend {
             // Backend received message from frontend - route to appropriate kernel
-            print("🔄 Backend routing message to kernels: '\(message.payload)'")
-            
-            // Route to first sensing kernel (in backend mode)
             if let sensingKernel = sensingKernels.first {
                 try await sensingKernel.receive(message: message)
             }
         } else {
             // Frontend received message from backend - route to interface kernels
-            print("🔄 Frontend routing message to interface kernels: '\(message.payload)'")
-            print("🔄 Available kernels: \(kernels.keys)")
-            
-            // Route to expression interface kernels for display
-            for (kernelId, kernel) in kernels {
+            for (_, kernel) in kernels {
                 if let expressionInterface = kernel as? ExpressionInterfaceKernel {
-                    print("🔄 Sending to ExpressionInterfaceKernel: '\(message.payload)'")
                     try await expressionInterface.receive(message: message)
-                } else {
-                    print("🔄 Kernel \(kernelId) is not ExpressionInterfaceKernel, it's \(type(of: kernel))")
                 }
             }
         }
@@ -159,49 +130,36 @@ public class KernelSystem: AsyncMessageHandler {
     public func emit(message: KernelMessage, from emitter: any Kernel) async throws {
         let emitterId = emitter.getKernelId()
         
-        print("🔄 KernelSystem.emit: From \(emitterId), mode: \(mode.rawValue)")
-        
         if mode == .frontend {
-            // Frontend: Send to backend via TCP (fire and forget)
-            print("🔄 Frontend sending to backend: '\(message.payload)'")
+            // Frontend: Send to backend via TCP
             try await sendToBackend(message)
         } else {
             // Backend: Local routing then send to frontend asynchronously
             if let destinationId = connections[emitterId],
                let destinationKernel = kernels[destinationId] {
                 // Forward to next kernel in pipeline
-                print("🔄 Backend forwarding \(emitterId) → \(destinationId): '\(message.payload)'")
                 try await destinationKernel.receive(message: message)
-            } else {
-                print("🔄 Backend: No connection found for \(emitterId)")
             }
             
             // If this is the final kernel (like ExpressionKernel), send to frontend asynchronously
             if emitter is ExpressionKernel {
-                print("🔄 Backend: ExpressionKernel detected, sending to frontend: '\(message.payload)'")
                 sendToFrontend(message)
-            } else {
-                print("🔄 Backend: Emitter is \(type(of: emitter)), not ExpressionKernel")
             }
         }
     }
 
     @discardableResult
     public func run() -> [Task<Void, Error>] {
-        print("KernelSystem running in \(mode.rawValue) mode...")
         var tasks: [Task<Void, Error>] = []
         
         if mode == .backend {
             // Backend mode: Start TCP server
-            print("Backend mode: Starting TCP server on \(host):\(port)")
             let serverTask = Task {
                 try await startTCPServer()
             }
             tasks.append(serverTask)
         } else {
             // Frontend mode: Connect to backend and start speech recognition
-            print("Frontend mode: Starting TCP client and speech recognition")
-            
             let clientTask = Task {
                 try await connectTCPClient()
             }

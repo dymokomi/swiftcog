@@ -32,9 +32,9 @@ public class TCPServer {
         listener.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                print("🚀 TCP server started on port \(self.listener.port!)")
+                print("TCP server started on port \(self.listener.port!)")
             case .failed(let error):
-                print("❌ TCP server failed: \(error)")
+                print("TCP server failed: \(error)")
             default:
                 break
             }
@@ -54,7 +54,6 @@ public class TCPServer {
     
     private func handleNewConnection(_ connection: NWConnection) {
         connections.append(connection)
-        print("📱 Frontend client connected (\(connections.count) total)")
         
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
@@ -62,7 +61,6 @@ public class TCPServer {
                 self?.startReceiving(connection)
             case .cancelled, .failed:
                 self?.connections.removeAll { $0 === connection }
-                print("📱 Frontend client disconnected (\(self?.connections.count ?? 0) remaining)")
             default:
                 break
             }
@@ -93,13 +91,12 @@ public class TCPServer {
                 let lineData = line.data(using: .utf8)!
                 let message = try JSONDecoder().decode(AsyncMessage.self, from: lineData)
                 
-                print("📥 Backend received: \(message.kernelMessage.payload)")
                 Task {
                     try await messageHandler?.handleMessage(message.kernelMessage)
                 }
             }
         } catch {
-            print("❌ Failed to decode message: \(error)")
+            print("Failed to decode message: \(error)")
         }
     }
     
@@ -114,14 +111,12 @@ public class TCPServer {
             for connection in connections {
                 connection.send(content: messageData, completion: .contentProcessed { error in
                     if let error = error {
-                        print("❌ Failed to send to client: \(error)")
+                        print("Failed to send to client: \(error)")
                     }
                 })
             }
-            
-            print("📤 Backend sent to \(connections.count) clients: \(message.payload)")
         } catch {
-            print("❌ Failed to encode message: \(error)")
+            print("Failed to encode message: \(error)")
         }
     }
     
@@ -160,15 +155,11 @@ public class TCPClient {
                     switch state {
                     case .ready:
                         resumed = true
-                        print("🔗 Frontend connected to TCP server at \(self.host):\(self.port)")
-                        self.startReceiving()  // ✅ Now startReceiving() gets called!
+                        self.startReceiving()
                         continuation.resume()
                     case .failed(let error):
                         resumed = true
-                        print("❌ Frontend connection failed: \(error)")
                         continuation.resume(throwing: error)
-                    case .cancelled:
-                        print("🔌 Frontend TCP connection closed")
                     default:
                         break
                     }
@@ -194,12 +185,9 @@ public class TCPClient {
     }
     
     private func handleMessage(_ data: Data) async {
-        print("🔄 TCPClient.handleMessage: Received \(data.count) bytes")
-        
         do {
             // Messages are newline-delimited JSON
             let lines = String(data: data, encoding: .utf8)?.components(separatedBy: "\n") ?? []
-            print("🔄 TCPClient: Parsed \(lines.count) lines: \(lines)")
             
             for line in lines {
                 guard !line.isEmpty else { continue }
@@ -207,11 +195,10 @@ public class TCPClient {
                 let lineData = line.data(using: .utf8)!
                 let message = try JSONDecoder().decode(AsyncMessage.self, from: lineData)
                 
-                print("📥 Frontend received: \(message.kernelMessage.payload)")
                 try await messageHandler?.handleMessage(message.kernelMessage)
             }
         } catch {
-            print("❌ Failed to decode message: \(error)")
+            print("Failed to decode message: \(error)")
         }
     }
     
@@ -230,14 +217,11 @@ public class TCPClient {
                 }
             })
         }
-        
-        print("📤 Frontend sent: \(message.payload)")
     }
     
     public func disconnect() async throws {
         connection?.cancel()
         connection = nil
-        print("🔌 Frontend TCP disconnected")
     }
 }
 
