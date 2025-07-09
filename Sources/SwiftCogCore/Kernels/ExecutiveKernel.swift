@@ -1,32 +1,37 @@
 import Foundation
-import Distributed
-import DistributedCluster
 
-public distributed actor ExecutiveKernel: Kernel {
-    let kernelId: KernelID
-    unowned let system: KernelSystem
+public class ExecutiveKernel: Kernel {
+    private let system: KernelSystem
     private let customHandler: ((KernelMessage, ExecutiveKernel) async throws -> Void)?
+    private let kernelId = KernelID.executive
 
-    public init(actorSystem: DefaultDistributedActorSystem, system: KernelSystem, customHandler: ((KernelMessage, ExecutiveKernel) async throws -> Void)? = nil) {
-        self.actorSystem = actorSystem
-        self.kernelId = KernelID()
+    public init(system: KernelSystem, customHandler: ((KernelMessage, ExecutiveKernel) async throws -> Void)? = nil) {
         self.system = system
         self.customHandler = customHandler
     }
 
-    public distributed func getKernelId() -> KernelID {
-        return self.kernelId
+    public func getKernelId() -> KernelID {
+        return kernelId
     }
 
-    public distributed func receive(message: KernelMessage) {
-        Task {
-            if let customHandler = customHandler {
-                // Use the custom handler if provided
-                try await customHandler(message, self)
-            } else {
-                // Default behavior: pass the message on
-                try await system.emit(message: message, from: self)
-            }
+    public func receive(message: KernelMessage) async throws {
+        print("🧠 ExecutiveKernel (Backend) received message: '\(message.payload)'")
+        
+        if let customHandler = customHandler {
+            try await customHandler(message, self)
+        } else {
+            try await defaultHandler(message: message)
         }
+    }
+    
+    private func defaultHandler(message: KernelMessage) async throws {
+        // Backend executive: Process with decision making and forward
+        let response = KernelMessage(
+            id: UUID(),
+            sourceKernelId: .executive,
+            payload: "Executive decision made for: '\(message.payload)'"
+        )
+        
+        try await system.emit(message: response, from: self)
     }
 } 

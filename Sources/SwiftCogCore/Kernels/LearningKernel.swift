@@ -1,20 +1,17 @@
 import Foundation
-import Distributed
-import DistributedCluster
 
-public distributed actor LearningKernel: Kernel {
-    let kernelId: KernelID
+public class LearningKernel: Kernel {
+    private let kernelId = KernelID.learning
 
-    public init(actorSystem: DefaultDistributedActorSystem) {
-        self.actorSystem = actorSystem
-        self.kernelId = KernelID()
+    public init() {
     }
 
-    public distributed func getKernelId() -> KernelID {
-        return self.kernelId
+    public func getKernelId() -> KernelID {
+        return kernelId
     }
 
-    public distributed func receive(message: KernelMessage) {
+    public func receive(message: KernelMessage) async throws {
         // Not implemented yet
+        print("📚 LearningKernel received message: '\(message.payload)'")
     }
 } 

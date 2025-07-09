@@ -1,42 +1,41 @@
 import Foundation
-import Distributed
-import DistributedCluster
 
-public distributed actor SensingKernel: Kernel {
-    let kernelId: KernelID
-    unowned let system: KernelSystem
-    private let speechEngine: SpeechToTextEngine
+public class SensingKernel: Kernel {
+    private let system: KernelSystem
+    private let apiKey: String
     private let customHandler: ((KernelMessage, SensingKernel) async throws -> Void)?
+    private let kernelId = KernelID.sensing
 
-    public init(actorSystem: DefaultDistributedActorSystem, system: KernelSystem, apiKey: String, customHandler: ((KernelMessage, SensingKernel) async throws -> Void)? = nil) {
-        self.actorSystem = actorSystem
-        self.kernelId = KernelID()
+    public init(system: KernelSystem, apiKey: String, customHandler: ((KernelMessage, SensingKernel) async throws -> Void)? = nil) {
         self.system = system
-        self.speechEngine = SpeechToTextEngine(apiKey: apiKey)
+        self.apiKey = apiKey
         self.customHandler = customHandler
     }
 
-    public distributed func getKernelId() -> KernelID {
-        return self.kernelId
+    public func getKernelId() -> KernelID {
+        return kernelId
     }
 
-    public distributed func startSensing() async throws {
-        print("SensingKernel: Starting speech recognition...")
-        for try await transcribedText in speechEngine.start() {
-            print("SensingKernel: sending '\(transcribedText)'")
-            let message = KernelMessage(source: self.kernelId, destination: nil, payload: transcribedText)
-            try await self.system.emit(message: message, from: self)
-        }
-    }
-
-    public distributed func receive(message: KernelMessage) {
+    public func receive(message: KernelMessage) async throws {
+        print("🧠 SensingKernel (Backend) received message: '\(message.payload)'")
+        
+        // Backend sensing: Just processes the message without speech recognition
         if let customHandler = customHandler {
-            Task {
-                // Use the custom handler if provided
-                try await customHandler(message, self)
-            }
+            try await customHandler(message, self)
         } else {
-            // Default behavior: A sensing kernel might not need to receive messages in this simple scenario
+            try await defaultHandler(message: message)
         }
+    }
+    
+    private func defaultHandler(message: KernelMessage) async throws {
+        // Create a response based on the input
+        let response = KernelMessage(
+            id: UUID(),
+            sourceKernelId: .sensing,
+            payload: "Cognitive processing complete for: '\(message.payload)'"
+        )
+        
+        // Emit to the kernel system for routing
+        try await system.emit(message: response, from: self)
     }
 } 

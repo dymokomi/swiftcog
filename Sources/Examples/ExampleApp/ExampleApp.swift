@@ -1,41 +1,82 @@
 import Foundation
 import SwiftCogCore
-import Distributed
 
 public class ExampleApp: SwiftCogApp {
     public static let appName = "ExampleApp"
     public static let appDescription = "A simple example cognitive architecture application"
     
     let system: KernelSystem
-    let sensingKernel: SensingKernel
-    let executiveKernel: ExecutiveKernel
-    let motorKernel: MotorKernel
-    let expressionKernel: ExpressionKernel
     let llmService: LLMService
+    
+    // Backend kernels
+    private var sensingKernel: SensingKernel?
+    private var executiveKernel: ExecutiveKernel?
+    private var motorKernel: MotorKernel?
+    private var expressionKernel: ExpressionKernel?
+    
+    // Frontend interface kernels
+    private var sensingInterfaceKernel: SensingInterfaceKernel?
+    private var expressionInterfaceKernel: ExpressionInterfaceKernel?
 
-    public required init(system: KernelSystem) async throws {
+    private init(system: KernelSystem, llmService: LLMService) {
         self.system = system
-        
-        // Initialize LLM Service with OpenAI Provider
-        // You should set your API key as an environment variable: OPENAI_API_KEY
+        self.llmService = llmService
+    }
+    
+    /// Initialize ExampleApp for backend mode with core cognitive kernels
+    public static func initBackend(system: KernelSystem) async throws -> Self {
         guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] else {
             throw NSError(domain: "ExampleApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY environment variable not set"])
         }
-        let openAIProvider = OpenAIProvider(apiKey: apiKey)
-        self.llmService = LLMService(provider: openAIProvider)
         
-        // Create SensingKernel (no custom handler needed for now)
+        let openAIProvider = OpenAIProvider(apiKey: apiKey)
+        let llmService = LLMService(provider: openAIProvider)
+        
+        let app = ExampleApp(system: system, llmService: llmService)
+        try await app.setupBackendKernels()
+        
+        return app as! Self
+    }
+    
+    /// Initialize ExampleApp for frontend mode with interface kernels
+    public static func initFrontend(system: KernelSystem) async throws -> Self {
+        guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] else {
+            throw NSError(domain: "ExampleApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY environment variable not set"])
+        }
+        
+        let openAIProvider = OpenAIProvider(apiKey: apiKey)
+        let llmService = LLMService(provider: openAIProvider)
+        
+        let app = ExampleApp(system: system, llmService: llmService)
+        try await app.setupFrontendKernels()
+        
+        return app as! Self
+    }
+    
+    private func setupBackendKernels() async throws {
+        print("ExampleApp: Initializing backend kernels...")
+        
+        // Create SensingKernel (no custom handler needed - will be connected from frontend)
         self.sensingKernel = try await system.createSensingKernel()
         
-        // Create ExpressionKernel with custom handler
+        // Create ExpressionKernel with custom handler that sends back to frontend
         self.expressionKernel = try await system.createExpressionKernel { message, kernel in
-            print("Custom ExpressionKernel handler: \(message.payload)")
+            print("Backend ExpressionKernel: \(message.payload)")
+            
+            // Format the message for frontend display
+            let formattedMessage = KernelMessage(
+                sourceKernelId: .expression,
+                payload: "🧠 SwiftCog Response: \(message.payload)"
+            )
+            
+            // Send the formatted response back to frontend
+            try await self.system.emit(message: formattedMessage, from: kernel)
         }
         
         // Create MotorKernel with custom handler
         self.motorKernel = try await system.createMotorKernel { message, kernel in
-            print("Custom MotorKernel handler: Processing \(message.payload)")
-            try await system.emit(message: message, from: kernel)
+            print("Backend MotorKernel: Processing \(message.payload)")
+            try await self.system.emit(message: message, from: kernel)
         }
         
         // Create ExecutiveKernel with custom handler that calls LLM
@@ -45,8 +86,7 @@ public class ExampleApp: SwiftCogApp {
                 let systemPrompt = """
                 You are an executive decision-making system in a cognitive architecture. 
                 Your role is to analyze input and provide intelligent decisions or responses.
-                Be concise, practical, and actionable in your responses.
-                Focus on the key insights and next steps.
+                Be very concise. Just provide direct answer to the question.
                 """
                 // Use the LLM service to process the message
                 let aiResponse = try await llmService.processMessage(
@@ -57,25 +97,44 @@ public class ExampleApp: SwiftCogApp {
                 )
                 // Create a new message with the AI-processed content
                 let processedMessage = KernelMessage(
-                    source: message.source,
-                    destination: message.destination,
+                    sourceKernelId: .executive,
                     payload: aiResponse
                 )
                 
                 // Emit the AI-processed message to the next kernel
-                try await system.emit(message: processedMessage, from: kernel)
+                try await self.system.emit(message: processedMessage, from: kernel)
                 
             } catch {
                 print("Error calling LLM: \(error.localizedDescription)")
                 // If LLM fails, pass through the original message
-                try await system.emit(message: message, from: kernel)
+                try await self.system.emit(message: message, from: kernel)
             }
         }
         
-        // Explicitly connect the kernels to form the pipeline
-        try await system.connect(from: self.sensingKernel, to: self.executiveKernel)
-        try await system.connect(from: self.executiveKernel, to: self.motorKernel)
-        try await system.connect(from: self.motorKernel, to: self.expressionKernel)
+        // Connect the backend kernels to form the pipeline
+        try await system.connect(from: self.sensingKernel!, to: self.executiveKernel!)
+        try await system.connect(from: self.executiveKernel!, to: self.motorKernel!)
+        try await system.connect(from: self.motorKernel!, to: self.expressionKernel!)
+        
+        print("ExampleApp: Backend kernel pipeline established")
+    }
+    
+    private func setupFrontendKernels() async throws {
+        print("ExampleApp: Initializing frontend interface kernels...")
+        
+        // Create SensingInterfaceKernel for speech input
+        self.sensingInterfaceKernel = try await system.createSensingInterfaceKernel { message, kernel in
+            print("Frontend SensingInterfaceKernel: Got speech input: \(message.payload)")
+        }
+        
+        // Create ExpressionInterfaceKernel for output display
+        self.expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { message, kernel in
+            print("🗣️ AI Response: \(message.payload)")
+            // In a real UI app, this would update the interface with the response
+        }
+        
+        print("ExampleApp: Frontend interface kernels created")
+        print("ExampleApp: Frontend setup complete - will connect to backend when HTTP client starts")
     }
 }
 

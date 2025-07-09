@@ -1,10 +1,34 @@
 import Foundation
+import ArgumentParser
+
+// MARK: - App Mode
+public enum AppMode: String, CaseIterable, ExpressibleByArgument {
+    case backend = "backend"
+    case frontend = "frontend"
+    
+    public var description: String {
+        switch self {
+        case .backend:
+            return "Backend server with core kernels"
+        case .frontend:
+            return "Frontend client connecting to backend"
+        }
+    }
+    
+    public var defaultValueDescription: String {
+        return description
+    }
+}
 
 /// Protocol that all SwiftCog applications must conform to
 public protocol SwiftCogApp: AnyObject {
-    /// Initialize the app with a KernelSystem
-    /// - Parameter system: The KernelSystem to use for this app
-    init(system: KernelSystem) async throws
+    /// Initialize the app for backend mode with core cognitive kernels
+    /// - Parameter system: The KernelSystem configured for backend mode
+    static func initBackend(system: KernelSystem) async throws -> Self
+    
+    /// Initialize the app for frontend mode with interface kernels
+    /// - Parameter system: The KernelSystem configured for frontend mode  
+    static func initFrontend(system: KernelSystem) async throws -> Self
     
     /// Optional method to get app metadata
     static var appName: String { get }

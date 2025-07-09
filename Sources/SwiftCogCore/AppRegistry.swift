@@ -2,37 +2,56 @@ import Foundation
 
 /// Registry for SwiftCog applications
 public class AppRegistry {
-    public typealias AppFactory = (KernelSystem) async throws -> SwiftCogApp
+    public typealias BackendAppFactory = (KernelSystem) async throws -> SwiftCogApp
+    public typealias FrontendAppFactory = (KernelSystem) async throws -> SwiftCogApp
     
-    private static var registeredApps: [String: AppFactory] = [:]
+    private static var registeredBackendApps: [String: BackendAppFactory] = [:]
+    private static var registeredFrontendApps: [String: FrontendAppFactory] = [:]
     
     /// Register an app with the registry
     /// - Parameters:
     ///   - name: The name of the app (should match directory name)
-    ///   - factory: A closure that creates an instance of the app
+    ///   - type: The app type that conforms to SwiftCogApp
     public static func register<T: SwiftCogApp>(
         name: String,
         type: T.Type
     ) {
-        registeredApps[name] = { system in
-            return try await T(system: system)
+        registeredBackendApps[name] = { system in
+            return try await T.initBackend(system: system)
+        }
+        registeredFrontendApps[name] = { system in
+            return try await T.initFrontend(system: system)
         }
     }
     
     /// Get all registered app names
     public static var availableApps: [String] {
-        return Array(registeredApps.keys).sorted()
+        return Array(registeredBackendApps.keys).sorted()
     }
     
-    /// Create an instance of a registered app
+    /// Create a backend instance of a registered app
     /// - Parameters:
     ///   - name: The name of the app to create
-    ///   - system: The KernelSystem to pass to the app
-    /// - Returns: An instance of the requested app
+    ///   - system: The KernelSystem configured for backend mode
+    /// - Returns: An instance of the requested app configured for backend
     /// - Throws: AppLoaderError if the app is not found
-    public static func createApp(named name: String, system: KernelSystem) async throws -> SwiftCogApp {
-        guard let factory = registeredApps[name] else {
-            throw AppLoaderError.appLoadingFailed("App '\(name)' not found in registry. Available apps: \(availableApps.joined(separator: ", "))")
+    public static func createBackendApp(named name: String, system: KernelSystem) async throws -> SwiftCogApp {
+        guard let factory = registeredBackendApps[name] else {
+            throw AppLoaderError.appLoadingFailed("Backend app '\(name)' not found in registry. Available apps: \(availableApps.joined(separator: ", "))")
+        }
+        
+        return try await factory(system)
+    }
+    
+    /// Create a frontend instance of a registered app
+    /// - Parameters:
+    ///   - name: The name of the app to create
+    ///   - system: The KernelSystem configured for frontend mode
+    /// - Returns: An instance of the requested app configured for frontend
+    /// - Throws: AppLoaderError if the app is not found
+    public static func createFrontendApp(named name: String, system: KernelSystem) async throws -> SwiftCogApp {
+        guard let factory = registeredFrontendApps[name] else {
+            throw AppLoaderError.appLoadingFailed("Frontend app '\(name)' not found in registry. Available apps: \(availableApps.joined(separator: ", "))")
         }
         
         return try await factory(system)
@@ -42,6 +61,6 @@ public class AppRegistry {
     /// - Parameter name: The name of the app to check
     /// - Returns: True if the app is registered, false otherwise
     public static func isRegistered(name: String) -> Bool {
-        return registeredApps[name] != nil
+        return registeredBackendApps[name] != nil
     }
 } 

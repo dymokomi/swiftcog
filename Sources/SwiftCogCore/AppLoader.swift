@@ -102,12 +102,12 @@ public class AppLoader {
         return AppInfo(name: appName, path: appDirectory, mainFile: mainFile)
     }
     
-    /// Load an app from a directory path using the registry
+    /// Load a backend app from a directory path using the registry
     /// - Parameters:
     ///   - appPath: Path to the app directory
-    ///   - system: KernelSystem to initialize the app with
-    /// - Returns: The loaded app instance
-    public static func loadApp(from appPath: String, system: KernelSystem) async throws -> SwiftCogApp {
+    ///   - system: KernelSystem configured for backend mode
+    /// - Returns: The loaded app instance configured for backend
+    public static func loadBackendApp(from appPath: String, system: KernelSystem) async throws -> SwiftCogApp {
         let fileManager = FileManager.default
         
         guard fileManager.fileExists(atPath: appPath) else {
@@ -121,15 +121,46 @@ public class AppLoader {
         
         // Use the app name to look up in the registry
         let appName = appInfo.name
-        return try await AppRegistry.createApp(named: appName, system: system)
+        return try await AppRegistry.createBackendApp(named: appName, system: system)
     }
     
-    /// Load an app by name (without requiring a directory path)
+    /// Load a frontend app from a directory path using the registry
+    /// - Parameters:
+    ///   - appPath: Path to the app directory
+    ///   - system: KernelSystem configured for frontend mode
+    /// - Returns: The loaded app instance configured for frontend
+    public static func loadFrontendApp(from appPath: String, system: KernelSystem) async throws -> SwiftCogApp {
+        let fileManager = FileManager.default
+        
+        guard fileManager.fileExists(atPath: appPath) else {
+            throw AppLoaderError.appDirectoryNotFound(appPath)
+        }
+        
+        let appInfo = try discoverAppInDirectory(appPath)
+        guard let appInfo = appInfo else {
+            throw AppLoaderError.noAppFileFound(appPath)
+        }
+        
+        // Use the app name to look up in the registry
+        let appName = appInfo.name
+        return try await AppRegistry.createFrontendApp(named: appName, system: system)
+    }
+    
+    /// Load a backend app by name (without requiring a directory path)
     /// - Parameters:
     ///   - appName: Name of the app to load
-    ///   - system: KernelSystem to initialize the app with
-    /// - Returns: The loaded app instance
-    public static func loadApp(named appName: String, system: KernelSystem) async throws -> SwiftCogApp {
-        return try await AppRegistry.createApp(named: appName, system: system)
+    ///   - system: KernelSystem configured for backend mode
+    /// - Returns: The loaded app instance configured for backend
+    public static func loadBackendApp(named appName: String, system: KernelSystem) async throws -> SwiftCogApp {
+        return try await AppRegistry.createBackendApp(named: appName, system: system)
+    }
+    
+    /// Load a frontend app by name (without requiring a directory path)
+    /// - Parameters:
+    ///   - appName: Name of the app to load
+    ///   - system: KernelSystem configured for frontend mode
+    /// - Returns: The loaded app instance configured for frontend
+    public static func loadFrontendApp(named appName: String, system: KernelSystem) async throws -> SwiftCogApp {
+        return try await AppRegistry.createFrontendApp(named: appName, system: system)
     }
 } 

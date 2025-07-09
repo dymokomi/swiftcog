@@ -1,32 +1,38 @@
 import Foundation
-import Distributed
-import DistributedCluster
 
-public distributed actor ExpressionKernel: Kernel {
-    let kernelId: KernelID
-    unowned let system: KernelSystem
+public class ExpressionKernel: Kernel {
+    private let system: KernelSystem
     private let customHandler: ((KernelMessage, ExpressionKernel) async throws -> Void)?
-    
-    public init(actorSystem: DefaultDistributedActorSystem, system: KernelSystem, customHandler: ((KernelMessage, ExpressionKernel) async throws -> Void)? = nil) {
-        self.actorSystem = actorSystem
-        self.kernelId = KernelID()
+    private let kernelId = KernelID.expression
+
+    public init(system: KernelSystem, customHandler: ((KernelMessage, ExpressionKernel) async throws -> Void)? = nil) {
         self.system = system
         self.customHandler = customHandler
     }
 
-    public distributed func getKernelId() -> KernelID {
-        return self.kernelId
+    public func getKernelId() -> KernelID {
+        return kernelId
     }
 
-    public distributed func receive(message: KernelMessage) {
+    public func receive(message: KernelMessage) async throws {
+        print("🗣️ ExpressionKernel (Backend) received message: '\(message.payload)'")
+        
         if let customHandler = customHandler {
-            Task {
-                // Use the custom handler if provided
-                try await customHandler(message, self)
-            }
+            try await customHandler(message, self)
         } else {
-            // Default behavior: print the message
-            print("ExpressionKernel received: \(message.payload)")
+            try await defaultHandler(message: message)
         }
+    }
+    
+    private func defaultHandler(message: KernelMessage) async throws {
+        // Backend expression: Format the message for output
+        let formattedMessage = KernelMessage(
+            id: UUID(),
+            sourceKernelId: .expression,
+            payload: "🧠 SwiftCog Response: \(message.payload)"
+        )
+        
+        // This will trigger sending to frontend via WebSocket
+        try await system.emit(message: formattedMessage, from: self)
     }
 } 
