@@ -1,12 +1,11 @@
 import Foundation
 import SwiftCogCore
 
-public class FrontendKernelSystem: AsyncMessageHandler, MessageSystem {
-    private var kernels: [KernelID: any Kernel] = [:]
-    private var sensingInterfaceKernels: [SensingInterfaceKernel] = []
+public class FrontendKernelSystem: AsyncMessageHandler {
     private var tcpClient: TCPClient?
     private let host: String
     private let port: Int
+    private var displayCommandHandler: ((DisplayCommand) -> Void)?
     
     public init(host: String = "127.0.0.1", port: Int = 8080) {
         self.host = host
@@ -16,21 +15,14 @@ public class FrontendKernelSystem: AsyncMessageHandler, MessageSystem {
         tcpClient?.messageHandler = self
     }
     
-    // MARK: - Frontend Interface Kernels
+    // MARK: - Display Command Handling
     
-    public func createSensingInterfaceKernel(customHandler: ((KernelMessage, SensingInterfaceKernel) async throws -> Void)? = nil) async throws -> SensingInterfaceKernel {
-        let kernel = SensingInterfaceKernel(system: self, customHandler: customHandler)
-        let kernelId = kernel.getKernelId()
-        kernels[kernelId] = kernel
-        sensingInterfaceKernels.append(kernel)
-        return kernel
+    public func setDisplayCommandHandler(_ handler: @escaping (DisplayCommand) -> Void) {
+        self.displayCommandHandler = handler
     }
     
-    public func createExpressionInterfaceKernel(customHandler: ((KernelMessage, ExpressionInterfaceKernel) async throws -> Void)? = nil) async throws -> ExpressionInterfaceKernel {
-        let kernel = ExpressionInterfaceKernel(system: self, customHandler: customHandler)
-        let kernelId = kernel.getKernelId()
-        kernels[kernelId] = kernel
-        return kernel
+    private func parseDisplayCommand(_ payload: String) -> DisplayCommand? {
+        return DisplayCommandFactory.createDisplayCommand(from: payload)
     }
     
     // MARK: - TCP Client Communication
@@ -40,8 +32,9 @@ public class FrontendKernelSystem: AsyncMessageHandler, MessageSystem {
         try await client.connect()
     }
     
-    public func sendToBackend(_ message: KernelMessage) async throws {
-        try await tcpClient?.send(message)
+    public func sendToBackend(_ message: String) async throws {
+        let kernelMessage = KernelMessage(sourceKernelId: .sensingInterface, payload: message)
+        try await tcpClient?.send(kernelMessage)
     }
     
     // MARK: - AsyncMessageHandler
@@ -49,30 +42,14 @@ public class FrontendKernelSystem: AsyncMessageHandler, MessageSystem {
     public func handleMessage(_ message: KernelMessage) async throws {
         print("🔄 FrontendKernelSystem.handleMessage() - Message: \(message.sourceKernelId) -> '\(message.payload)'")
         
-        // Frontend received message from backend - route to interface kernels
-        print("📥 Frontend routing message to ExpressionInterfaceKernel")
-        var foundKernel = false
-        for (_, kernel) in kernels {
-            if let expressionInterface = kernel as? ExpressionInterfaceKernel {
-                print("✅ Found ExpressionInterfaceKernel, sending message")
-                try await expressionInterface.receive(message: message)
-                foundKernel = true
+        // Parse display command from backend and send to UI
+        if let displayCommand = parseDisplayCommand(message.payload) {
+            await MainActor.run {
+                displayCommandHandler?(displayCommand)
             }
+        } else {
+            print("❌ Failed to parse display command from: \(message.payload)")
         }
-        if !foundKernel {
-            print("❌ No ExpressionInterfaceKernel found on frontend!")
-        }
-    }
-    
-    // MARK: - Message Emission
-    
-    public func emit(message: KernelMessage, from emitter: any Kernel) async throws {
-        let emitterId = emitter.getKernelId()
-        print("🚀 FrontendKernelSystem.emit() - From: \(emitterId), Message: '\(message.payload)'")
-        
-        // Frontend: Send to backend via TCP
-        print("📤 Frontend sending to backend via TCP")
-        try await sendToBackend(message)
     }
     
     // MARK: - System Management

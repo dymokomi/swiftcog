@@ -8,7 +8,6 @@ public enum KernelID: String, CaseIterable, Codable, Sendable {
     case motor = "motor"
     case expression = "expression"
     
-    // Frontend interface kernels
+    // Frontend message identifier
     case sensingInterface = "sensing-interface"
-    case expressionInterface = "expression-interface"
 } 

@@ -6,8 +6,6 @@ import SwiftCogCore
 class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private var window: NSWindow?
     private var chatController: ChatController?
-    private var sensingInterfaceKernel: SensingInterfaceKernel?
-    private var expressionInterfaceKernel: ExpressionInterfaceKernel?
     private var system: FrontendKernelSystem?
     private var speechEngine: SpeechToTextEngine?
     
@@ -22,8 +20,8 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 let system = FrontendKernelSystem(host: "127.0.0.1", port: 8080)
                 self.system = system
                 
-                // Create interface kernels directly in GUI
-                try await self.createInterfaceKernels(system: system)
+                // Create SpeechToTextEngine for speech input
+                speechEngine = SpeechToTextEngine(apiKey: getAPIKey())
                 
                 // Start the kernel system background tasks
                 let _ = system.run()
@@ -69,48 +67,22 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
     }
     
-    private func createInterfaceKernels(system: FrontendKernelSystem) async throws {
-        // Create SensingInterfaceKernel for user input
-        sensingInterfaceKernel = try await system.createSensingInterfaceKernel(
-            customHandler: { message, kernel in
-                print("GUI SensingInterfaceKernel: Got user input: \(message.payload)")
-            }
-        )
-        
-        // Create SpeechToTextEngine for speech input
-        speechEngine = SpeechToTextEngine(apiKey: getAPIKey())
-        
-        // Create ExpressionInterfaceKernel for display commands
-        expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { [weak self] message, kernel in
-            print("🎯 GUI: Received display message: '\(message.payload)'")
-            
-            // Parse display commands from backend
-            let displayCommand = self?.parseDisplayCommand(message.payload)
-            
-            if let displayCommand = displayCommand {
-                DispatchQueue.main.async {
-                    self?.chatController?.handleDisplayCommand(displayCommand)
-                }
-            }
-        }
-    }
-    
-    private func parseDisplayCommand(_ payload: String) -> DisplayCommand? {
-        return DisplayCommandFactory.createDisplayCommand(from: payload)
-    }
-    
     @MainActor
     private func createWindow() {
         let chatController = ChatController { userMessage in
             Task {
-                // Send user message through the sensing interface kernel
-                let message = KernelMessage(sourceKernelId: .sensingInterface, payload: userMessage)
-                try? await self.system?.emit(message: message, from: self.sensingInterfaceKernel!)
+                // Send user message directly to backend
+                try? await self.system?.sendToBackend(userMessage)
             }
         }
         
         // Store reference for display commands
         self.chatController = chatController
+        
+        // Set up display command handler
+        system?.setDisplayCommandHandler { displayCommand in
+            chatController.handleDisplayCommand(displayCommand)
+        }
         
         // Create the SwiftUI content view
         let contentView = ChatView(controller: chatController)
