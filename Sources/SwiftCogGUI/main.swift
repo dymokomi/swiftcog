@@ -73,14 +73,7 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
     
     private func parseDisplayCommand(_ payload: String) -> DisplayCommand? {
-        // Simple parsing - in practice you might use JSON
-        if payload.hasPrefix("SwiftCog Response: ") {
-            let message = String(payload.dropFirst("SwiftCog Response: ".count))
-            return ShowMessageCommand(message: message, isUser: false)
-        } else {
-            // For any other message, treat it as a display message
-            return ShowMessageCommand(message: payload, isUser: false)
-        }
+        return DisplayCommandFactory.createDisplayCommand(from: payload)
     }
     
     @MainActor

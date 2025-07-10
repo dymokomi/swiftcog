@@ -31,21 +31,18 @@ public class ExampleApp {
         
         print("ExampleApp: Initializing backend kernels...")
         
-        // Create SensingKernel (no custom handler needed - will be connected from frontend)
-        app.sensingKernel = try await system.createSensingKernel()
+        // Create SensingKernel with custom handler that passes through the original message
+        app.sensingKernel = try await system.createSensingKernel { message, kernel in
+            // Just pass through the original message without modification
+            try await app.system.emit(message: message, from: kernel)
+        }
         
         // Create ExpressionKernel with custom handler that sends back to frontend
         app.expressionKernel = try await system.createExpressionKernel { message, kernel in
             print("Backend ExpressionKernel: \(message.payload)")
             
-            // Format the message for frontend display
-            let formattedMessage = KernelMessage(
-                sourceKernelId: .expression,
-                payload: "SwiftCog Response: \(message.payload)"
-            )
-            
-            // Send the formatted response back to frontend
-            try await app.system.emit(message: formattedMessage, from: kernel)
+            // Send the display command to frontend
+            try await app.system.emit(message: message, from: kernel)
         }
         
         // Create MotorKernel with custom handler
@@ -57,32 +54,91 @@ public class ExampleApp {
         // Create ExecutiveKernel with custom handler that calls LLM
         app.executiveKernel = try await system.createExecutiveKernel { [llmService = app.llmService] message, kernel in
             do {
-                // Define custom system prompt for the executive decision-making
+                let encoder = JSONEncoder()
+                
+                // Step 1: Send command to show user text bubble
+                let userTextBubbleCommand = TextBubbleCommand(text: message.payload, isUser: true)
+                let commandData = try encoder.encode(userTextBubbleCommand)
+                let commandJson = String(data: commandData, encoding: .utf8) ?? ""
+                
+                let userBubbleMessage = KernelMessage(
+                    sourceKernelId: .executive,
+                    payload: commandJson
+                )
+                
+                try await app.system.emit(message: userBubbleMessage, from: kernel)
+                
+                // Step 2: Show thinking indicator
+                let showThinkingCommand = ShowThinkingCommand()
+                let thinkingCommandData = try encoder.encode(showThinkingCommand)
+                let thinkingCommandJson = String(data: thinkingCommandData, encoding: .utf8) ?? ""
+                
+                let thinkingMessage = KernelMessage(
+                    sourceKernelId: .executive,
+                    payload: thinkingCommandJson
+                )
+                
+                try await app.system.emit(message: thinkingMessage, from: kernel)
+                
+                // Step 3: Define custom system prompt for the executive decision-making
                 let systemPrompt = """
                 You are an executive decision-making system in a cognitive architecture. 
                 Your role is to analyze input and provide intelligent decisions or responses.
                 Be very concise. Just provide direct answer to the question.
                 """
-                // Use the LLM service to process the message
+                
+                // Step 4: Use the LLM service to process the message
                 let aiResponse = try await llmService.processMessage(
                     message.payload,
                     systemPrompt: systemPrompt,
                     temperature: 0.7,
                     maxTokens: 500
                 )
-                // Create a new message with the AI-processed content
-                let processedMessage = KernelMessage(
+                
+                // Step 5: Hide thinking indicator
+                let hideThinkingCommand = HideThinkingCommand()
+                let hideThinkingCommandData = try encoder.encode(hideThinkingCommand)
+                let hideThinkingCommandJson = String(data: hideThinkingCommandData, encoding: .utf8) ?? ""
+                
+                let hideThinkingMessage = KernelMessage(
                     sourceKernelId: .executive,
-                    payload: aiResponse
+                    payload: hideThinkingCommandJson
                 )
                 
-                // Emit the AI-processed message to the next kernel
-                try await app.system.emit(message: processedMessage, from: kernel)
+                try await app.system.emit(message: hideThinkingMessage, from: kernel)
+                
+                // Step 6: Send command to show AI response bubble (grey color for assistant)
+                let aiTextBubbleCommand = TextBubbleCommand(text: aiResponse, isUser: false)
+                let aiCommandData = try encoder.encode(aiTextBubbleCommand)
+                let aiCommandJson = String(data: aiCommandData, encoding: .utf8) ?? ""
+                
+                let aiProcessedMessage = KernelMessage(
+                    sourceKernelId: .executive,
+                    payload: aiCommandJson
+                )
+                
+                // Emit the AI display command to the next kernel
+                try await app.system.emit(message: aiProcessedMessage, from: kernel)
                 
             } catch {
-                print("Error calling LLM: \(error.localizedDescription)")
-                // If LLM fails, pass through the original message
-                try await app.system.emit(message: message, from: kernel)
+                print("Error in ExecutiveKernel: \(error.localizedDescription)")
+                
+                // If anything fails, send error as text bubble
+                do {
+                    let encoder = JSONEncoder()
+                    let errorBubbleCommand = TextBubbleCommand(text: "Error: \(error.localizedDescription)", isUser: false)
+                    let errorCommandData = try encoder.encode(errorBubbleCommand)
+                    let errorCommandJson = String(data: errorCommandData, encoding: .utf8) ?? ""
+                    
+                    let errorMessage = KernelMessage(
+                        sourceKernelId: .executive,
+                        payload: errorCommandJson
+                    )
+                    
+                    try await app.system.emit(message: errorMessage, from: kernel)
+                } catch {
+                    print("Failed to send error message: \(error)")
+                }
             }
         }
         

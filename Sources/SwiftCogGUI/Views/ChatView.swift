@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Foundation
+import SwiftCogCore
 
 // MARK: - Chat Message Model
 struct ChatMessage: Codable, Identifiable {
@@ -35,12 +36,20 @@ class ChatController: ObservableObject {
     func handleDisplayCommand(_ command: DisplayCommand) {
         DispatchQueue.main.async {
             switch command.type {
-            case .showMessage:
-                if let cmd = command as? ShowMessageCommand {
-                    self.addMessage(cmd.message, isUser: cmd.isUser)
+            case .textBubble:
+                if let cmd = command as? TextBubbleCommand {
+                    self.addTextBubble(cmd.text, isUser: cmd.isUser)
                 }
             case .clearScreen:
                 self.clearMessages()
+            case .highlightText:
+                if let cmd = command as? HighlightTextCommand {
+                    self.highlightText(cmd.text, color: cmd.highlightColor)
+                }
+            case .displayList:
+                if let cmd = command as? DisplayListCommand {
+                    self.displayList(cmd.items, allowSelection: cmd.allowSelection)
+                }
             case .showThinking:
                 self.showThinking()
             case .hideThinking:
@@ -49,11 +58,15 @@ class ChatController: ObservableObject {
                 if let cmd = command as? UpdateStatusCommand {
                     self.updateStatus(cmd.status)
                 }
+            case .showMessage: // Legacy support
+                if let cmd = command as? ShowMessageCommand {
+                    self.addTextBubble(cmd.message, isUser: cmd.isUser)
+                }
             }
         }
     }
     
-    private func addMessage(_ content: String, isUser: Bool) {
+    private func addTextBubble(_ content: String, isUser: Bool) {
         let message = ChatMessage(content: content, isUser: isUser)
         messages.append(message)
         
@@ -61,7 +74,7 @@ class ChatController: ObservableObject {
         let escapedContent = content.replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
         
-        let script = "addMessage(\"\(escapedContent)\", \(isUser));"
+        let script = "addTextBubble(\"\(escapedContent)\", \(isUser));"
         webView?.evaluateJavaScript(script) { _, error in
             if let error = error {
                 print("❌ ChatController: JavaScript error: \(error)")
@@ -69,9 +82,44 @@ class ChatController: ObservableObject {
         }
     }
     
+    private func addMessage(_ content: String, isUser: Bool) {
+        // Deprecated - use addTextBubble instead
+        addTextBubble(content, isUser: isUser)
+    }
+    
     private func clearMessages() {
         messages.removeAll()
-        webView?.evaluateJavaScript("clearMessages();")
+        webView?.evaluateJavaScript("clearScreen();")
+    }
+    
+    private func highlightText(_ text: String, color: String) {
+        let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        let escapedColor = color.replacingOccurrences(of: "\"", with: "\\\"")
+        
+        let script = "highlightText(\"\(escapedText)\", \"\(escapedColor)\");"
+        webView?.evaluateJavaScript(script) { _, error in
+            if let error = error {
+                print("❌ ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
+    private func displayList(_ items: [ListItem], allowSelection: Bool) {
+        do {
+            let encoder = JSONEncoder()
+            let itemsData = try encoder.encode(items)
+            let itemsJson = String(data: itemsData, encoding: .utf8) ?? "[]"
+            
+            let script = "displayList(\(itemsJson), \(allowSelection));"
+            webView?.evaluateJavaScript(script) { _, error in
+                if let error = error {
+                    print("❌ ChatController: JavaScript error: \(error)")
+                }
+            }
+        } catch {
+            print("❌ ChatController: Failed to encode list items: \(error)")
+        }
     }
     
     private func showThinking() {
@@ -88,8 +136,8 @@ class ChatController: ObservableObject {
     }
     
     func handleUserMessage(_ message: String) {
-        // Add user message immediately to UI
-        addMessage(message, isUser: true)
+        // No longer automatically add user message to UI
+        // Backend will send explicit command to show user text bubble
         
         // Send to backend
         onUserMessage?(message)

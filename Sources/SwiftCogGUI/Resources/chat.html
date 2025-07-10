@@ -159,6 +159,44 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #555555;
         }
+        
+        /* Highlight text styles */
+        .highlight-text {
+            background-color: #ffff00;
+            color: #000000;
+            padding: 2px 4px;
+            border-radius: 2px;
+            font-weight: bold;
+        }
+        
+        /* List display styles */
+        .display-list {
+            border: 1px solid #888888;
+            margin: 12px 0;
+            padding: 0;
+            list-style: none;
+        }
+        
+        .display-list-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid #333333;
+            color: #00ff00;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .display-list-item:hover {
+            background-color: #333333;
+        }
+        
+        .display-list-item.selected {
+            background-color: #006600;
+            color: #ffffff;
+        }
+        
+        .display-list-item:last-child {
+            border-bottom: none;
+        }
     </style>
 </head>
 <body>
@@ -174,8 +212,8 @@
         let isWaiting = false;
         const MAX_MESSAGES = 5;
         
-        function addMessage(content, isUser) {
-            // Remove oldest message if we have 5 messages (excluding thinking indicator)
+        function addTextBubble(content, isUser) {
+            // Remove oldest message if we have 5 messages (excluding thinking indicator and other elements)
             const messages = chatContainer.querySelectorAll('.message');
             if (messages.length >= MAX_MESSAGES) {
                 messages[0].remove();
@@ -198,6 +236,76 @@
             if (welcomeMsg) {
                 welcomeMsg.remove();
             }
+        }
+        
+        // Legacy support
+        function addMessage(content, isUser) {
+            addTextBubble(content, isUser);
+        }
+        
+        function clearScreen() {
+            chatContainer.innerHTML = '';
+        }
+        
+        function highlightText(text, color = '#ffff00') {
+            const highlightDiv = document.createElement('div');
+            highlightDiv.className = 'message';
+            highlightDiv.innerHTML = `
+                <div class="message-bubble">
+                    <div class="message-content">
+                        <span class="highlight-text" style="background-color: ${color};">${text}</span>
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(highlightDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
+        function displayList(items, allowSelection = false) {
+            const listDiv = document.createElement('div');
+            listDiv.className = 'message';
+            
+            const listElement = document.createElement('ul');
+            listElement.className = 'display-list';
+            
+            items.forEach(item => {
+                const listItem = document.createElement('li');
+                listItem.className = 'display-list-item';
+                listItem.textContent = item.text;
+                listItem.dataset.itemId = item.id;
+                
+                if (item.isSelected) {
+                    listItem.classList.add('selected');
+                }
+                
+                if (allowSelection) {
+                    listItem.addEventListener('click', () => {
+                        // Toggle selection
+                        const wasSelected = listItem.classList.contains('selected');
+                        
+                        // Remove selection from all items in this list
+                        listElement.querySelectorAll('.display-list-item').forEach(li => {
+                            li.classList.remove('selected');
+                        });
+                        
+                        if (!wasSelected) {
+                            listItem.classList.add('selected');
+                        }
+                        
+                        // Notify Swift about selection change
+                        window.webkit.messageHandlers.listSelectionHandler?.postMessage({
+                            itemId: item.id,
+                            selected: !wasSelected
+                        });
+                    });
+                }
+                
+                listElement.appendChild(listItem);
+            });
+            
+            listDiv.appendChild(listElement);
+            chatContainer.appendChild(listDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
         
         function showThinking() {
@@ -223,11 +331,25 @@
             }
         }
         
+        function updateStatus(status) {
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'message';
+            statusDiv.innerHTML = `
+                <div class="message-bubble">
+                    <div class="message-content" style="color: #888888; font-style: italic;">
+                        ${status}
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(statusDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
         // Function to be called from Swift for voice input
         function addUserMessage(message) {
             if (isWaiting) return;
             
-            addMessage(message, true);
+            // No longer automatically add user message - backend will send explicit command
             isWaiting = true;
             showThinking();
             
@@ -238,7 +360,7 @@
         // Function to be called from Swift
         function addAIResponse(response) {
             hideThinking();
-            addMessage(response, false);
+            addTextBubble(response, false);
             isWaiting = false;
         }
     </script>
