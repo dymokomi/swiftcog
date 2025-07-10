@@ -8,7 +8,8 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private var chatController: ChatController?
     private var sensingInterfaceKernel: SensingInterfaceKernel?
     private var expressionInterfaceKernel: ExpressionInterfaceKernel?
-    private var system: KernelSystem?
+    private var system: FrontendKernelSystem?
+    private var speechEngine: SpeechToTextEngine?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure the application
@@ -17,8 +18,8 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
         // Initialize the GUI app
         Task {
             do {
-                // Create kernel system for frontend mode
-                let system = KernelSystem(apiKey: getAPIKey(), mode: .frontend, host: "127.0.0.1", port: 8080)
+                // Create frontend kernel system
+                let system = FrontendKernelSystem(host: "127.0.0.1", port: 8080)
                 self.system = system
                 
                 // Create interface kernels directly in GUI
@@ -33,6 +34,11 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 }
                 
                 print("SwiftCog GUI app started successfully!")
+                
+                // Start speech recognition
+                Task {
+                    await self.startSpeechRecognition()
+                }
             } catch {
                 print("Error initializing SwiftCog GUI: \(error)")
                 await MainActor.run {
@@ -42,20 +48,37 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
     }
     
-    private func createInterfaceKernels(system: KernelSystem) async throws {
+    private func startSpeechRecognition() async {
+        guard let speechEngine = speechEngine else {
+            print("❌ Speech engine not initialized")
+            return
+        }
+        
+        do {
+            print("🎙️ Starting speech recognition...")
+            for try await speechText in speechEngine.start() {
+                print("🎯 GUI: Speech input: '\(speechText)'")
+                
+                // Handle speech input directly in GUI
+                await MainActor.run {
+                    self.chatController?.handleUserMessage(speechText)
+                }
+            }
+        } catch {
+            print("❌ Speech recognition error: \(error)")
+        }
+    }
+    
+    private func createInterfaceKernels(system: FrontendKernelSystem) async throws {
         // Create SensingInterfaceKernel for user input
         sensingInterfaceKernel = try await system.createSensingInterfaceKernel(
             customHandler: { message, kernel in
                 print("GUI SensingInterfaceKernel: Got user input: \(message.payload)")
-            },
-            speechInputCallback: { [weak self] speechText in
-                print("🎯 GUI: Speech input: '\(speechText)'")
-                // Handle speech input directly in GUI
-                DispatchQueue.main.async {
-                    self?.chatController?.handleUserMessage(speechText)
-                }
             }
         )
+        
+        // Create SpeechToTextEngine for speech input
+        speechEngine = SpeechToTextEngine(apiKey: getAPIKey())
         
         // Create ExpressionInterfaceKernel for display commands
         expressionInterfaceKernel = try await system.createExpressionInterfaceKernel { [weak self] message, kernel in

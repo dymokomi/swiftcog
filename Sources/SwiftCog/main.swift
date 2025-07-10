@@ -36,7 +36,7 @@ struct SwiftCogCLI: AsyncParsableCommand {
         print("TCP: \(host):\(port)")
         
         // Create kernel system with TCP configuration
-        let system = KernelSystem(apiKey: apiKey, mode: .backend, host: host, port: port)
+        let system = KernelSystem(apiKey: apiKey, host: host, port: port)
         
         do {
             // Create and run the app based on mode

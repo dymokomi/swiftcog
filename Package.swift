@@ -47,7 +47,8 @@ let package = Package(
         .executableTarget(
             name: "SwiftCogGUI",
             dependencies: [
-                "SwiftCogCore"
+                "SwiftCogCore",
+                .product(name: "OpenAIKit", package: "OpenAIKit")
             ],
             path: "Sources/SwiftCogGUI",
             resources: [.process("Resources/chat.html")]

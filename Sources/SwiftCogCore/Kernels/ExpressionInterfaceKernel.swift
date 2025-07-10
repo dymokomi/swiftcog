@@ -1,11 +1,11 @@
 import Foundation
 
 public class ExpressionInterfaceKernel: Kernel {
-    private let system: KernelSystem
+    private let system: MessageSystem
     private let customHandler: ((KernelMessage, ExpressionInterfaceKernel) async throws -> Void)?
     private let kernelId = KernelID.expressionInterface
 
-    public init(system: KernelSystem, customHandler: ((KernelMessage, ExpressionInterfaceKernel) async throws -> Void)? = nil) {
+    public init(system: MessageSystem, customHandler: ((KernelMessage, ExpressionInterfaceKernel) async throws -> Void)? = nil) {
         self.system = system
         self.customHandler = customHandler
     }
