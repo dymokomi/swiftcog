@@ -301,7 +301,8 @@ struct ChatView: View {
             // Transcription overlay on top
             TranscriptionOverlay(
                 transcription: speechEngine.currentTranscription,
-                isListening: speechEngine.isListening
+                isListening: speechEngine.isListening,
+                isSpeechDetected: speechEngine.isSpeechDetected
             )
         }
     }
