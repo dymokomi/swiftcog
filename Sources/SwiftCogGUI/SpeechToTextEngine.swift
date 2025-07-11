@@ -13,10 +13,11 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
     @Published public var isListening = false
     @Published public var isSpeechDetected = false // VAD state for UI
     
-    // Native VAD-based silence detection
+    // Hybrid VAD-based silence detection
     private var silenceTimer: Timer?
     private let silenceThreshold: TimeInterval = 1.2 // 1200ms as requested
-    private var lastSpeechStoppedTime: Date?
+    private var lastTranscriptionUpdateTime = Date()
+    private var lastTranscriptionContent = ""
     private var hasSpeechBeenDetected = false
     
     // Completion handlers
@@ -112,11 +113,15 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         isListening = true
         currentTranscription = ""
         isSpeechDetected = false
-        lastSpeechStoppedTime = nil
+        lastTranscriptionUpdateTime = Date()
+        lastTranscriptionContent = ""
         hasSpeechBeenDetected = false
         startSilenceTimer()
         
-        print("SpeechToTextEngine: Started listening with native VAD")
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let timestamp = formatter.string(from: Date())
+        print("[\(timestamp)] SpeechToTextEngine: Started listening with hybrid VAD")
     }
     
     public func stopListening() {
@@ -131,9 +136,11 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         recognitionRequest = nil
         recognitionTask = nil
         
-        // Stop silence timer
-        silenceTimer?.invalidate()
-        silenceTimer = nil
+        // Stop silence timer (ensure on main thread)
+        DispatchQueue.main.async { [weak self] in
+            self?.silenceTimer?.invalidate()
+            self?.silenceTimer = nil
+        }
         
         isListening = false
         
@@ -141,48 +148,81 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
     }
     
     private func startSilenceTimer() {
-        silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        // Ensure timer is created on main thread
+        DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            // Only check for silence if speech was detected and then stopped
-            guard let speechStoppedTime = self.lastSpeechStoppedTime,
-                  self.hasSpeechBeenDetected,
-                  !self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  self.isListening else { return }
-            
-            let timeSinceSpeechStopped = Date().timeIntervalSince(speechStoppedTime)
-            
-            if timeSinceSpeechStopped >= self.silenceThreshold {
-                print("SpeechToTextEngine: VAD silence timeout (\(String(format: "%.1f", timeSinceSpeechStopped))s), finalizing: '\(self.currentTranscription)'")
-                self.handleSilenceDetected()
+            self.silenceTimer?.invalidate()
+            self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+                guard let self = self else { 
+                    print("Timer fired but self is nil")
+                    return 
+                }
+                
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss.SSS"
+                let timestamp = formatter.string(from: Date())
+                
+                // Check if transcription has stopped updating for the threshold period
+                let timeSinceLastUpdate = Date().timeIntervalSince(self.lastTranscriptionUpdateTime)
+                
+                // Debug current state - ALWAYS show when we have any content AND every 1 second to show timer is alive
+                let transcription = self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+                let shouldLog = !transcription.isEmpty || self.hasSpeechBeenDetected || Int(timeSinceLastUpdate * 5) % 5 == 0
+                
+                if shouldLog {
+                    print("[\(timestamp)] Timer check: speechDetected=\(self.hasSpeechBeenDetected), hasContent=\(!transcription.isEmpty), timeSinceUpdate=\(String(format: "%.1f", timeSinceLastUpdate))s, threshold=\(self.silenceThreshold)s, listening=\(self.isListening)")
+                }
+                
+                // Only proceed if we have speech detected and content and haven't had updates recently
+                if self.hasSpeechBeenDetected && 
+                   !self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                   timeSinceLastUpdate >= self.silenceThreshold &&
+                   self.isListening {
+                    
+                    print("[\(timestamp)] SpeechToTextEngine: Transcription silence timeout (\(String(format: "%.1f", timeSinceLastUpdate))s), finalizing: '\(self.currentTranscription)'")
+                    self.handleSilenceDetected()
+                }
             }
+            
+            print("Timer created on main thread: \(Thread.isMainThread)")
         }
     }
     
     private func updateTranscription(_ text: String) {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let timestamp = formatter.string(from: Date())
+        
+        // Only update timer if transcription content actually changed
+        if trimmedText != lastTranscriptionContent && !trimmedText.isEmpty {
+            lastTranscriptionUpdateTime = Date()
+            lastTranscriptionContent = trimmedText
+            print("[\(timestamp)] SpeechToTextEngine: Transcription updated: '\(trimmedText)'")
+        } else if !trimmedText.isEmpty {
+            print("[\(timestamp)] SpeechToTextEngine: Transcription refinement (no content change): '\(trimmedText)'")
+        }
+        
         currentTranscription = text
         onTranscriptionUpdate?(text)
-        
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedText.isEmpty {
-            print("SpeechToTextEngine: Transcription updated: '\(trimmedText)'")
-        }
     }
     
     private func handleSilenceDetected() {
         let finalText = currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !finalText.isEmpty else { return }
         
-        // Stop listening and timer
-        silenceTimer?.invalidate()
+        // Stop listening and timer (ensure on main thread)
+        DispatchQueue.main.async { [weak self] in
+            self?.silenceTimer?.invalidate()
+        }
         stopListening()
         
         // Clear current transcription and reset state
         currentTranscription = ""
         isSpeechDetected = false
         hasSpeechBeenDetected = false
-        lastSpeechStoppedTime = nil
+        lastTranscriptionContent = ""
         
         // Call the completion handler
         onFinalTranscription?(finalText)
@@ -225,9 +265,12 @@ extension SpeechToTextEngine: SFSpeechRecognitionTaskDelegate {
             
             // Mark speech as detected when we get first transcription
             if !self.isSpeechDetected && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                print("SpeechToTextEngine: VAD - Speech started")
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss.SSS"
+                let timestamp = formatter.string(from: Date())
+                print("[\(timestamp)] SpeechToTextEngine: VAD - Speech started")
                 self.isSpeechDetected = true
-                self.lastSpeechStoppedTime = nil // Clear any previous stop time
+                self.hasSpeechBeenDetected = true
             }
             
             self.updateTranscription(text)
@@ -236,14 +279,11 @@ extension SpeechToTextEngine: SFSpeechRecognitionTaskDelegate {
     
     public func speechRecognitionTaskFinishedReadingAudio(_ task: SFSpeechRecognitionTask) {
         DispatchQueue.main.async {
-            print("SpeechToTextEngine: VAD - Speech stopped")
+            print("SpeechToTextEngine: VAD - Native speech stopped detected")
             self.isSpeechDetected = false
-            self.lastSpeechStoppedTime = Date()
             
-            // Mark that we detected speech during this session
-            if !self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                self.hasSpeechBeenDetected = true
-            }
+            // This delegate method isn't reliable on macOS, so we mainly rely on transcription timing
+            // but we can use it to update UI state when available
         }
     }
     
