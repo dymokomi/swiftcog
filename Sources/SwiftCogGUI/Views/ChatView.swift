@@ -31,7 +31,7 @@ class ChatController: ObservableObject {
     }
     
     func handleUserMessage(_ message: String) {
-        addMessage(message, isUser: true)
+        // Don't add message locally - let the server handle all display commands
         onUserMessage(message)
     }
     
