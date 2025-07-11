@@ -134,6 +134,30 @@ class ChatController: ObservableObject {
         }
     }
     
+    func showGlow() {
+        guard let webView = webView else { return }
+        
+        let script = "showGlow();"
+        
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
+    func hideGlow() {
+        guard let webView = webView else { return }
+        
+        let script = "hideGlow();"
+        
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
     func handleDisplayCommand(_ command: DisplayCommand) {
         switch command.type {
         case .textBubble:
@@ -300,26 +324,19 @@ struct ChatView: View {
         ZStack {
             ChatWebViewWrapper(controller: controller)
             
-            // Green glow effect when looking at screen
-            Rectangle()
-                .fill(.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 0)
-                        .stroke(Color.green.opacity(0.6), lineWidth: 4)
-                        .shadow(color: .green, radius: 20, x: 0, y: 0)
-                        .shadow(color: .green, radius: 40, x: 0, y: 0)
-                        .allowsHitTesting(false)
-                )
-                .opacity(gazeTracker.lookingAtScreen ? 1.0 : 0.0)
-                .animation(.easeInOut(duration: 1.0), value: gazeTracker.lookingAtScreen)
-                .allowsHitTesting(false)
-            
             // Transcription overlay on top
             TranscriptionOverlay(
                 transcription: speechEngine.currentTranscription,
                 isListening: speechEngine.isListening,
                 isSpeechDetected: speechEngine.isSpeechDetected
             )
+        }
+        .onChange(of: gazeTracker.lookingAtScreen) { _, isLooking in
+            if isLooking {
+                controller.showGlow()
+            } else {
+                controller.hideGlow()
+            }
         }
     }
 } 

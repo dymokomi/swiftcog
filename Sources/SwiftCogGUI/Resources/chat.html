@@ -197,6 +197,39 @@
         .display-list-item:last-child {
             border-bottom: none;
         }
+        
+        /* Green glow effect */
+        .glow-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+        }
+        
+        .glow-overlay.active {
+            opacity: 1;
+        }
+        
+        .glow-overlay::before {
+            content: '';
+            position: absolute;
+            top: -50px;
+            left: -50px;
+            right: -50px;
+            bottom: -50px;
+            border: 20px solid #00ff00;
+            box-shadow: 
+                inset 0 0 30px #00ff00,
+                inset 0 0 50px #00ff00,
+                inset 0 0 70px #00ff00,
+                inset 0 0 90px #00ff00;
+            opacity: 0.8;
+        }
     </style>
 </head>
 <body>
@@ -206,6 +239,9 @@
             <p>Listening for voice input...</p>
         </div>
     </div>
+    
+    <!-- Green glow overlay -->
+    <div class="glow-overlay" id="glowOverlay"></div>
     
     <script>
         const chatContainer = document.getElementById('chatContainer');
@@ -362,6 +398,21 @@
             hideThinking();
             addTextBubble(response, false);
             isWaiting = false;
+        }
+        
+        // Glow effect functions
+        function showGlow() {
+            const glowOverlay = document.getElementById('glowOverlay');
+            if (glowOverlay) {
+                glowOverlay.classList.add('active');
+            }
+        }
+        
+        function hideGlow() {
+            const glowOverlay = document.getElementById('glowOverlay');
+            if (glowOverlay) {
+                glowOverlay.classList.remove('active');
+            }
         }
     </script>
 </body>
