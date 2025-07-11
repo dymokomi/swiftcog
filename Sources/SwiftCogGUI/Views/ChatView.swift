@@ -38,8 +38,14 @@ class ChatController: ObservableObject {
     func addMessage(_ text: String, isUser: Bool) {
         guard let webView = webView else { return }
         
-        let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        // Properly escape all special characters for JavaScript
+        let escapedText = text
+            .replacingOccurrences(of: "\\", with: "\\\\")  // Escape backslashes first
+            .replacingOccurrences(of: "'", with: "\\'")     // Escape single quotes
+            .replacingOccurrences(of: "\"", with: "\\\"")   // Escape double quotes
+            .replacingOccurrences(of: "\n", with: "\\n")    // Escape newlines
+            .replacingOccurrences(of: "\r", with: "\\r")    // Escape carriage returns
+            .replacingOccurrences(of: "\t", with: "\\t")    // Escape tabs
         
         let script = "addMessage('\(escapedText)', \(isUser));"
         
@@ -86,7 +92,15 @@ class ChatController: ObservableObject {
     func updateStatus(_ status: String) {
         guard let webView = webView else { return }
         
-        let escapedStatus = status.replacingOccurrences(of: "\"", with: "\\\"")
+        // Properly escape all special characters for JavaScript
+        let escapedStatus = status
+            .replacingOccurrences(of: "\\", with: "\\\\")  // Escape backslashes first
+            .replacingOccurrences(of: "'", with: "\\'")     // Escape single quotes
+            .replacingOccurrences(of: "\"", with: "\\\"")   // Escape double quotes
+            .replacingOccurrences(of: "\n", with: "\\n")    // Escape newlines
+            .replacingOccurrences(of: "\r", with: "\\r")    // Escape carriage returns
+            .replacingOccurrences(of: "\t", with: "\\t")    // Escape tabs
+        
         let script = "updateStatus('\(escapedStatus)');"
         
         webView.evaluateJavaScript(script) { result, error in

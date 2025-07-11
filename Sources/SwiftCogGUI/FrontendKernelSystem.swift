@@ -89,40 +89,13 @@ public class FrontendKernelSystem: AsyncMessageHandler {
     public func handleMessage(_ message: KernelMessage) async throws {
         print("FrontendKernelSystem.handleMessage() - Message: \(message.sourceKernelId) -> '\(message.payload)'")
         
-        // Try to parse as PythonAsyncMessage first (for Python server)
-        if let data = message.payload.data(using: .utf8),
-           let pythonMessage = try? JSONDecoder().decode(PythonAsyncMessage.self, from: data) {
-            await handlePythonAsyncMessage(pythonMessage)
-        } else {
-            // Fallback to regular display command parsing (for direct kernel messages)
-            if let displayCommand = parseDisplayCommand(message.payload) {
-                await MainActor.run {
-                    displayCommandHandler?(displayCommand)
-                }
-            } else {
-                print("Failed to parse display command from: \(message.payload)")
-            }
-        }
-    }
-    
-    private func handlePythonAsyncMessage(_ message: PythonAsyncMessage) async {
-        switch MessageType(rawValue: message.type) {
-        case .kernelMessage:
-            if let kernelMessage = message.kernelMessage {
-                if let displayCommand = parseDisplayCommand(kernelMessage.payload) {
-                    await MainActor.run {
-                        displayCommandHandler?(displayCommand)
-                    }
-                }
-            }
-        case .error:
-            let errorText = message.errorMessage ?? message.message ?? "Unknown error"
-            print("Error: \(errorText)")
+        // Parse the payload directly as a DisplayCommand (not wrapped in PythonAsyncMessage)
+        if let displayCommand = parseDisplayCommand(message.payload) {
             await MainActor.run {
-                errorHandler?(errorText)
+                displayCommandHandler?(displayCommand)
             }
-        default:
-            print("Unknown Python message type: \(message.type)")
+        } else {
+            print("Failed to parse display command from: \(message.payload)")
         }
     }
     
