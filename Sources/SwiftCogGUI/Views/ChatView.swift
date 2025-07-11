@@ -288,15 +288,31 @@ struct ChatWebViewWrapper: NSViewRepresentable {
 struct ChatView: View {
     @ObservedObject var controller: ChatController
     @ObservedObject var speechEngine: SpeechToTextEngine
+    @ObservedObject var gazeTracker: GazeTracker
     
-    init(controller: ChatController, speechEngine: SpeechToTextEngine) {
+    init(controller: ChatController, speechEngine: SpeechToTextEngine, gazeTracker: GazeTracker) {
         self.controller = controller
         self.speechEngine = speechEngine
+        self.gazeTracker = gazeTracker
     }
     
     var body: some View {
         ZStack {
             ChatWebViewWrapper(controller: controller)
+            
+            // Green glow effect when looking at screen
+            Rectangle()
+                .fill(.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 0)
+                        .stroke(Color.green.opacity(0.6), lineWidth: 4)
+                        .shadow(color: .green, radius: 20, x: 0, y: 0)
+                        .shadow(color: .green, radius: 40, x: 0, y: 0)
+                        .allowsHitTesting(false)
+                )
+                .opacity(gazeTracker.lookingAtScreen ? 1.0 : 0.0)
+                .animation(.easeInOut(duration: 1.0), value: gazeTracker.lookingAtScreen)
+                .allowsHitTesting(false)
             
             // Transcription overlay on top
             TranscriptionOverlay(

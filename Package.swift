@@ -32,7 +32,11 @@ let package = Package(
                 .product(name: "OpenAIKit", package: "OpenAIKit")
             ],
             path: "Sources/SwiftCogGUI",
-            resources: [.process("Resources/chat.html")]
+            resources: [.process("Resources/chat.html")],
+            linkerSettings: [
+                .linkedFramework("Vision"),
+                .linkedFramework("AVFoundation")
+            ]
         ),
     ]
 )

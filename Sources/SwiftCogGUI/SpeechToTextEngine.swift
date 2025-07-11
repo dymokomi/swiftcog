@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Speech
+import Combine
 
 public class SpeechToTextEngine: NSObject, ObservableObject {
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
@@ -20,6 +21,12 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
     private var lastTranscriptionContent = ""
     private var hasSpeechBeenDetected = false
     
+    // Gaze tracking integration
+    private weak var gazeTracker: GazeTracker?
+    private var gazeCancellable: AnyCancellable?
+    private var shouldListenWhenGazeReturns = false
+    private var wasListeningBeforeGazeLoss = false
+    
     // Completion handlers
     private var onFinalTranscription: ((String) -> Void)?
     private var onTranscriptionUpdate: ((String) -> Void)?
@@ -34,6 +41,84 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
     public override init() {
         super.init()
         setupSpeechRecognizer()
+    }
+    
+    deinit {
+        gazeCancellable?.cancel()
+        stopListening()
+    }
+    
+    public func setGazeTracker(_ gazeTracker: GazeTracker) {
+        self.gazeTracker = gazeTracker
+        
+        // Use Combine to observe the published property
+        gazeCancellable = gazeTracker.$lookingAtScreen
+            .removeDuplicates()
+            .sink { [weak self] isLooking in
+                self?.handleGazeStateChange(isLooking: isLooking)
+            }
+        
+        print("SpeechToTextEngine: Gaze tracker configured")
+    }
+    
+    private func handleGazeStateChange(isLooking: Bool) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let timestamp = formatter.string(from: Date())
+        
+        // Removed verbose logging - only log important state changes below
+        
+        if isLooking {
+            print("[\(timestamp)] SpeechToTextEngine: User looking at screen")
+            
+            // If we should start listening when gaze returns and we're not currently listening
+            if shouldListenWhenGazeReturns && !isListening {
+                shouldListenWhenGazeReturns = false
+                print("[\(timestamp)] SpeechToTextEngine: Restarting listening due to gaze return")
+                
+                do {
+                    try startListeningWithGazeOverride(
+                        onTranscriptionUpdate: onTranscriptionUpdate ?? { _ in },
+                        onFinalTranscription: onFinalTranscription ?? { _ in },
+                        forceStart: true // Override gaze check since we know user is looking
+                    )
+                } catch {
+                    print("[\(timestamp)] SpeechToTextEngine: Error restarting listening: \(error)")
+                }
+            } else if shouldListenWhenGazeReturns && isListening {
+                shouldListenWhenGazeReturns = false // Reset flag
+            } else if !shouldListenWhenGazeReturns && !isListening && onFinalTranscription != nil {
+                // Initial gaze detection - try to start listening
+                print("[\(timestamp)] SpeechToTextEngine: Initial gaze detection - starting listening")
+                do {
+                    try startListeningWithGazeOverride(
+                        onTranscriptionUpdate: onTranscriptionUpdate ?? { _ in },
+                        onFinalTranscription: onFinalTranscription ?? { _ in },
+                        forceStart: true // Override gaze check since we know user is looking
+                    )
+                } catch {
+                    print("[\(timestamp)] SpeechToTextEngine: Error starting listening on initial gaze: \(error)")
+                }
+            }
+        } else {
+            print("[\(timestamp)] SpeechToTextEngine: User not looking at screen")
+            
+            // If we're currently listening but user looked away
+            if isListening {
+                wasListeningBeforeGazeLoss = true
+                
+                // If user is currently speaking, don't interrupt - let the silence timer handle it
+                if hasSpeechBeenDetected && !currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    print("[\(timestamp)] SpeechToTextEngine: User speaking while looking away - will stop after silence")
+                    shouldListenWhenGazeReturns = true
+                } else {
+                    // No active speech, stop listening immediately
+                    print("[\(timestamp)] SpeechToTextEngine: No active speech - stopping listening immediately")
+                    stopListening()
+                    shouldListenWhenGazeReturns = true
+                }
+            }
+        }
     }
     
     private func setupSpeechRecognizer() {
@@ -64,6 +149,34 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         onTranscriptionUpdate: @escaping (String) -> Void,
         onFinalTranscription: @escaping (String) -> Void
     ) throws {
+        try startListeningWithGazeOverride(
+            onTranscriptionUpdate: onTranscriptionUpdate,
+            onFinalTranscription: onFinalTranscription,
+            forceStart: false
+        )
+    }
+    
+    private func startListeningWithGazeOverride(
+        onTranscriptionUpdate: @escaping (String) -> Void,
+        onFinalTranscription: @escaping (String) -> Void,
+        forceStart: Bool
+    ) throws {
+        // Store completion handlers first
+        self.onTranscriptionUpdate = onTranscriptionUpdate
+        self.onFinalTranscription = onFinalTranscription
+        
+        // Check if user is looking at screen first (unless forced)
+        let isLookingAtScreen = gazeTracker?.lookingAtScreen ?? true
+        let hasGazeTracker = gazeTracker != nil
+        
+        if !forceStart && !isLookingAtScreen && hasGazeTracker {
+            print("SpeechToTextEngine: User not looking at screen - deferring listening")
+            shouldListenWhenGazeReturns = true
+            return
+        } else if forceStart {
+            print("SpeechToTextEngine: Starting listening (gaze override)")
+        }
+        
         // Check permissions
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
             throw EngineError.permissionDenied
@@ -72,10 +185,6 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
             throw EngineError.speechRecognitionNotAvailable
         }
-        
-        // Store completion handlers
-        self.onTranscriptionUpdate = onTranscriptionUpdate
-        self.onFinalTranscription = onFinalTranscription
         
         // Cancel any previous recognition task
         stopListening()
@@ -154,10 +263,7 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
             
             self.silenceTimer?.invalidate()
             self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-                guard let self = self else { 
-                    print("Timer fired but self is nil")
-                    return 
-                }
+                guard let self = self else { return }
                 
                 let formatter = DateFormatter()
                 formatter.dateFormat = "HH:mm:ss.SSS"
@@ -166,26 +272,33 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
                 // Check if transcription has stopped updating for the threshold period
                 let timeSinceLastUpdate = Date().timeIntervalSince(self.lastTranscriptionUpdateTime)
                 
-                // Debug current state - ALWAYS show when we have any content AND every 1 second to show timer is alive
+                // Only log when there's speech activity or every 30 seconds to confirm timer is alive
                 let transcription = self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
-                let shouldLog = !transcription.isEmpty || self.hasSpeechBeenDetected || Int(timeSinceLastUpdate * 5) % 5 == 0
+                let shouldLog = !transcription.isEmpty || self.hasSpeechBeenDetected || Int(timeSinceLastUpdate) % 30 == 0
                 
                 if shouldLog {
                     print("[\(timestamp)] Timer check: speechDetected=\(self.hasSpeechBeenDetected), hasContent=\(!transcription.isEmpty), timeSinceUpdate=\(String(format: "%.1f", timeSinceLastUpdate))s, threshold=\(self.silenceThreshold)s, listening=\(self.isListening)")
                 }
                 
-                // Only proceed if we have speech detected and content and haven't had updates recently
+                // Check if we have speech content and haven't had updates recently
                 if self.hasSpeechBeenDetected && 
                    !self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                    timeSinceLastUpdate >= self.silenceThreshold &&
                    self.isListening {
                     
-                    print("[\(timestamp)] SpeechToTextEngine: Transcription silence timeout (\(String(format: "%.1f", timeSinceLastUpdate))s), finalizing: '\(self.currentTranscription)'")
-                    self.handleSilenceDetected()
+                    let isLookingAtScreen = self.gazeTracker?.lookingAtScreen ?? true
+                    
+                    if isLookingAtScreen {
+                        // User is looking - finalize normally
+                        print("[\(timestamp)] SpeechToTextEngine: Transcription silence timeout (\(String(format: "%.1f", timeSinceLastUpdate))s), finalizing: '\(self.currentTranscription)'")
+                        self.handleSilenceDetected()
+                    } else {
+                        // User finished speaking but not looking - stop listening and wait for gaze return
+                        print("[\(timestamp)] SpeechToTextEngine: Speech finished but user not looking - stopping until gaze returns")
+                        self.handleSilenceDetectedWithoutGaze()
+                    }
                 }
             }
-            
-            print("Timer created on main thread: \(Thread.isMainThread)")
         }
     }
     
@@ -227,19 +340,47 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         // Call the completion handler
         onFinalTranscription?(finalText)
         
-        // Restart listening after a brief delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self else { return }
-            
-            do {
-                try self.startListening(
-                    onTranscriptionUpdate: self.onTranscriptionUpdate ?? { _ in },
-                    onFinalTranscription: self.onFinalTranscription ?? { _ in }
-                )
-            } catch {
-                print("SpeechToTextEngine: Error restarting listening: \(error)")
+        // Only restart if user is looking at screen
+        if gazeTracker?.lookingAtScreen ?? true {
+            // Restart listening after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self = self else { return }
+                
+                do {
+                    try self.startListening(
+                        onTranscriptionUpdate: self.onTranscriptionUpdate ?? { _ in },
+                        onFinalTranscription: self.onFinalTranscription ?? { _ in }
+                    )
+                } catch {
+                    print("SpeechToTextEngine: Error restarting listening: \(error)")
+                }
             }
+        } else {
+            // User not looking - wait for gaze return
+            shouldListenWhenGazeReturns = true
         }
+    }
+    
+    private func handleSilenceDetectedWithoutGaze() {
+        let finalText = currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Stop listening and timer (ensure on main thread)
+        DispatchQueue.main.async { [weak self] in
+            self?.silenceTimer?.invalidate()
+        }
+        stopListening()
+        
+        // Clear current transcription and reset state
+        currentTranscription = ""
+        isSpeechDetected = false
+        hasSpeechBeenDetected = false
+        lastTranscriptionContent = ""
+        
+        // Don't send to server - user not looking
+        print("SpeechToTextEngine: Discarding transcription due to lack of attention: '\(finalText)'")
+        
+        // Wait for gaze to return before listening again
+        shouldListenWhenGazeReturns = true
     }
 }
 

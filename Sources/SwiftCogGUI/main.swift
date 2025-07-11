@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 import SwiftCogCore
+import AVFoundation
+import Vision
 // Import our local views
 
 class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
@@ -8,6 +10,7 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private var chatController: ChatController?
     private var system: FrontendKernelSystem?
     private var speechEngine: SpeechToTextEngine?
+    private var gazeTracker: GazeTracker?
     private var windowDelegate: WindowDelegate?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -28,6 +31,14 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
             // Create SpeechToTextEngine for speech input
             speechEngine = SpeechToTextEngine()
             
+            // Create GazeTracker for gaze-based VAD blocking
+            gazeTracker = GazeTracker()
+            
+            // Wire up gaze tracker with speech engine
+            if let speechEngine = speechEngine, let gazeTracker = gazeTracker {
+                speechEngine.setGazeTracker(gazeTracker)
+            }
+            
             // Start the kernel system background tasks
             let _ = system.run()
             
@@ -37,6 +48,12 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
             }
             
             print("SwiftCog GUI app started successfully!")
+            
+            // Start gaze tracking
+            gazeTracker?.start()
+            
+            // Give gaze tracker time to initialize
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
             
             // Start speech recognition
             await startSpeechRecognition()
@@ -60,7 +77,7 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
         
         // Create the main chat view
-        let chatView = ChatView(controller: chatController!, speechEngine: speechEngine!)
+        let chatView = ChatView(controller: chatController!, speechEngine: speechEngine!, gazeTracker: gazeTracker!)
         
         // Create the window
         window = NSWindow(
