@@ -60,6 +60,7 @@ public class FrontendKernelSystem: AsyncMessageHandler {
     }
     
     private func parseDisplayCommand(_ payload: String) -> DisplayCommand? {
+        // The payload is already a JSON string from the server, so parse it directly
         return DisplayCommandFactory.createDisplayCommand(from: payload)
     }
     
@@ -87,8 +88,6 @@ public class FrontendKernelSystem: AsyncMessageHandler {
     // MARK: - AsyncMessageHandler
     
     public func handleMessage(_ message: KernelMessage) async throws {
-        print("FrontendKernelSystem.handleMessage() - Message: \(message.sourceKernelId) -> '\(message.payload)'")
-        
         // Parse the payload directly as a DisplayCommand (not wrapped in PythonAsyncMessage)
         if let displayCommand = parseDisplayCommand(message.payload) {
             await MainActor.run {

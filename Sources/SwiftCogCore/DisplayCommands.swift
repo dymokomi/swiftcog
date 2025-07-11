@@ -39,12 +39,29 @@ public struct TextBubbleCommand: DisplayCommand {
         try container.encode(timestamp, forKey: .timestamp)
     }
     
-    // Custom decoding
+    // Custom decoding to handle both Date objects and ISO 8601 timestamp strings
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         text = try container.decode(String.self, forKey: .text)
         isUser = try container.decode(Bool.self, forKey: .isUser)
-        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        
+        // Try to decode timestamp as Date first, then fall back to ISO 8601 string
+        if let date = try? container.decode(Date.self, forKey: .timestamp) {
+            timestamp = date
+        } else if let timestampString = try? container.decode(String.self, forKey: .timestamp) {
+            // Parse ISO 8601 timestamp string
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: timestampString) {
+                timestamp = date
+            } else {
+                // Fallback to current time if parsing fails
+                timestamp = Date()
+            }
+        } else {
+            // Fallback to current time if both methods fail
+            timestamp = Date()
+        }
     }
     
     private enum CodingKeys: String, CodingKey {
@@ -170,12 +187,29 @@ public struct ShowMessageCommand: DisplayCommand {
         try container.encode(timestamp, forKey: .timestamp)
     }
     
-    // Custom decoding
+    // Custom decoding to handle both Date objects and ISO 8601 timestamp strings
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         message = try container.decode(String.self, forKey: .message)
         isUser = try container.decode(Bool.self, forKey: .isUser)
-        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        
+        // Try to decode timestamp as Date first, then fall back to ISO 8601 string
+        if let date = try? container.decode(Date.self, forKey: .timestamp) {
+            timestamp = date
+        } else if let timestampString = try? container.decode(String.self, forKey: .timestamp) {
+            // Parse ISO 8601 timestamp string
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: timestampString) {
+                timestamp = date
+            } else {
+                // Fallback to current time if parsing fails
+                timestamp = Date()
+            }
+        } else {
+            // Fallback to current time if both methods fail
+            timestamp = Date()
+        }
     }
     
     private enum CodingKeys: String, CodingKey {
