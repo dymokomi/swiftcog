@@ -29,8 +29,14 @@ class LearningKernel:
         
         # Hardcoded connection: Learning -> Memory
         try:
+            # Create a new TextMessage with LearningKernel as the source
+            forwarded_message = TextMessage(
+                source_kernel_id=KernelID.LEARNING,
+                content=content
+            )
+            
             memory_kernel = ray.get_actor("MemoryKernel")
-            await memory_kernel.receive.remote(message)
+            await memory_kernel.receive.remote(forwarded_message)
             print("LearningKernel -> MemoryKernel")
         except ValueError:
             print("Error: MemoryKernel not found") 
