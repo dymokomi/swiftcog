@@ -9,13 +9,15 @@ import websockets
 from websockets.server import WebSocketServerProtocol
 import ray
 from swiftcog_types import KernelID, KernelMessage, AsyncMessage, MessageType
-from sensing_kernel import SensingKernel
-from executive_kernel import ExecutiveKernel
-from motor_kernel import MotorKernel
-from expression_kernel import ExpressionKernel
-from memory_kernel import MemoryKernel
-from learning_kernel import LearningKernel
-from kernels import SharedLLMService
+from kernels import (
+    SensingKernel,
+    ExecutiveKernel,
+    MotorKernel,
+    ExpressionKernel,
+    MemoryKernel,
+    LearningKernel
+)
+from shared_components import SharedLLMService
 import os
 
 
