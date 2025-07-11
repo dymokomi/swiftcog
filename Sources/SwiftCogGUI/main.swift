@@ -34,9 +34,10 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
             // Create GazeTracker for gaze-based VAD blocking
             gazeTracker = GazeTracker()
             
-            // Wire up gaze tracker with speech engine
+            // Wire up gaze tracker with speech engine and kernel system
             if let speechEngine = speechEngine, let gazeTracker = gazeTracker {
                 speechEngine.setGazeTracker(gazeTracker)
+                gazeTracker.setKernelSystem(system)
             }
             
             // Start the kernel system background tasks

@@ -6,6 +6,9 @@ public class GazeTracker: NSObject, ObservableObject {
     // Published state drives UI and VAD blocking
     @Published public var lookingAtScreen: Bool = false
     
+    // Reference to kernel system for sending gaze data
+    private weak var kernelSystem: FrontendKernelSystem?
+    
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "gaze.tracker.queue")
     private lazy var request: VNDetectFaceLandmarksRequest = {
@@ -17,6 +20,11 @@ public class GazeTracker: NSObject, ObservableObject {
     public override init() {
         super.init()
         requestCameraPermission()
+    }
+    
+    public func setKernelSystem(_ kernelSystem: FrontendKernelSystem) {
+        self.kernelSystem = kernelSystem
+        print("GazeTracker: Kernel system configured for gaze data transmission")
     }
     
     private func requestCameraPermission() {
@@ -116,13 +124,48 @@ public class GazeTracker: NSObject, ObservableObject {
             let previousValue = self.lookingAtScreen
             self.lookingAtScreen = newValue
             
-            // Only log state changes
+            // Only log and send messages on state changes
             if previousValue != newValue {
                 let formatter = DateFormatter()
                 formatter.dateFormat = "HH:mm:ss.SSS"
                 let timestamp = formatter.string(from: Date())
                 print("[\(timestamp)] GazeTracker: Looking at screen changed: \(previousValue) -> \(newValue)")
+                
+                // Send gaze data to sensing kernel
+                self.sendGazeDataMessage(lookingAtScreen: newValue, timestamp: timestamp)
             }
+        }
+    }
+    
+    private func sendGazeDataMessage(lookingAtScreen: Bool, timestamp: String) {
+        guard let kernelSystem = kernelSystem else {
+            // Silent - not all deployments need gaze data messaging
+            return
+        }
+        
+        // Create structured gaze data payload
+        let gazeData: [String: Any] = [
+            "messageType": "gazeData",
+            "lookingAtScreen": lookingAtScreen,
+            "timestamp": timestamp
+        ]
+        
+        // Convert to JSON string
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: gazeData, options: [])
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+            
+            // Send asynchronously to avoid blocking the gaze tracking thread
+            Task {
+                do {
+                    try await kernelSystem.sendToBackend(jsonString)
+                    print("[\(timestamp)] GazeTracker: Sent gaze data - looking: \(lookingAtScreen)")
+                } catch {
+                    print("[\(timestamp)] GazeTracker: Failed to send gaze data: \(error)")
+                }
+            }
+        } catch {
+            print("[\(timestamp)] GazeTracker: Failed to serialize gaze data: \(error)")
         }
     }
 }
