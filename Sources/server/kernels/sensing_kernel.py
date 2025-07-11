@@ -3,7 +3,7 @@ Sensing kernel implementation for the SwiftCog Python server.
 """
 from typing import Callable, Optional
 import ray
-from swiftcog_types import KernelID, KernelMessage
+from swiftcog_types import KernelID, KernelMessage, GazeMessage, VoiceMessage, TextMessage
 
 
 @ray.remote
@@ -19,48 +19,73 @@ class SensingKernel:
     
     async def receive(self, message: KernelMessage) -> None:
         """Receive and process a message."""
-        if self.custom_handler:
-            await self.custom_handler(message, self)
-        else:
-            await self.default_handler(message)
-    
-    async def default_handler(self, message: KernelMessage) -> None:
-        """Default handler that processes the message and forwards directly to Executive."""
-        print(f"SensingKernel: Processing '{message.payload}'")
+        print(f"SensingKernel: Processing {message.get_message_type()} message from {message.source_kernel_id.value}")
         
-        # Check if this is gaze data
-        if self.is_gaze_data_message(message.payload):
-            await self.handle_gaze_data(message.payload)
+        # Handle different message types
+        if isinstance(message, GazeMessage):
+            await self.handle_gaze_data(message)
             return
-        
-        # Regular user input - forward to Executive
-        try:
-            executive_kernel = ray.get_actor("ExecutiveKernel")
-            await executive_kernel.receive.remote(message)
-            print("SensingKernel -> ExecutiveKernel")
-        except ValueError:
-            print("Error: ExecutiveKernel not found")
+        elif isinstance(message, VoiceMessage):
+            await self.handle_voice_data(message)
+            return
+        elif isinstance(message, TextMessage):
+            await self.handle_text_data(message)
+            return
+        else:
+            print(f"SensingKernel: Unknown message type: {type(message)}")
+            # Forward unknown messages as text
+            await self.handle_text_data(message)
     
-    def is_gaze_data_message(self, payload: str) -> bool:
-        """Check if the message payload contains gaze data."""
-        try:
-            import json
-            data = json.loads(payload)
-            return data.get("messageType") == "gazeData"
-        except (json.JSONDecodeError, AttributeError):
-            return False
-    
-    async def handle_gaze_data(self, payload: str) -> None:
+    async def handle_gaze_data(self, message: GazeMessage) -> None:
         """Handle gaze data messages - for now just log them."""
         try:
-            import json
-            gaze_data = json.loads(payload)
-            looking_at_screen = gaze_data.get("lookingAtScreen", False)
-            timestamp = gaze_data.get("timestamp", "unknown")
+            # Send gaze data to memory kernel
+            memory_kernel = ray.get_actor("MemoryKernel")
+            await memory_kernel.receive.remote(message)
+            print("SensingKernel -> MemoryKernel (gaze data)")
             
-            print(f"SensingKernel: Received gaze data - looking at screen: {looking_at_screen} at {timestamp}")
+            print(f"SensingKernel: Received gaze data - looking at screen: {message.looking_at_screen}")
             # For now, just log the gaze data as requested
             # Future implementations could store this data, trigger behaviors, etc.
             
         except Exception as e:
-            print(f"SensingKernel: Error processing gaze data: {e}") 
+            print(f"SensingKernel: Error processing gaze data: {e}")
+    
+    async def handle_voice_data(self, message: VoiceMessage) -> None:
+        """Handle voice/speech data messages."""
+        try:
+            # Send voice data to memory kernel
+            memory_kernel = ray.get_actor("MemoryKernel")
+            await memory_kernel.receive.remote(message)
+            print("SensingKernel -> MemoryKernel (voice data)")
+            
+            # Forward voice data to executive for processing
+            executive_kernel = ray.get_actor("ExecutiveKernel")
+            await executive_kernel.receive.remote(message)
+            print("SensingKernel -> ExecutiveKernel (voice data)")
+            
+            print(f"SensingKernel: Received voice data - transcription: '{message.transcription}'")
+            
+        except Exception as e:
+            print(f"SensingKernel: Error processing voice data: {e}")
+    
+    async def handle_text_data(self, message: KernelMessage) -> None:
+        """Handle text data messages."""
+        try:
+            # Send text data to memory kernel
+            memory_kernel = ray.get_actor("MemoryKernel")
+            await memory_kernel.receive.remote(message)
+            print("SensingKernel -> MemoryKernel (text data)")
+            
+            # Forward text data to executive for processing
+            executive_kernel = ray.get_actor("ExecutiveKernel")
+            await executive_kernel.receive.remote(message)
+            print("SensingKernel -> ExecutiveKernel (text data)")
+            
+            if isinstance(message, TextMessage):
+                print(f"SensingKernel: Received text data: '{message.content}'")
+            else:
+                print(f"SensingKernel: Received unknown message type: {type(message)}")
+            
+        except Exception as e:
+            print(f"SensingKernel: Error processing text data: {e}") 

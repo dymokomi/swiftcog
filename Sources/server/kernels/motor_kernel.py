@@ -3,7 +3,7 @@ Motor kernel implementation for the SwiftCog Python server.
 """
 from typing import Callable, Optional
 import ray
-from swiftcog_types import KernelID, KernelMessage
+from swiftcog_types import KernelID, KernelMessage, TextMessage
 
 
 @ray.remote
@@ -18,15 +18,14 @@ class MotorKernel:
         return self.kernel_id
     
     async def receive(self, message: KernelMessage) -> None:
-        """Receive and process a message."""
-        if self.custom_handler:
-            await self.custom_handler(message, self)
-        else:
-            await self.default_handler(message)
-    
-    async def default_handler(self, message: KernelMessage) -> None:
         """Default handler that processes motor commands and forwards directly to Expression."""
-        print(f"MotorKernel: Processing {message.payload}")
+        if isinstance(message, TextMessage):
+            content = message.content
+        else:
+            print(f"MotorKernel: Unsupported message type: {type(message)}")
+            return
+            
+        print(f"MotorKernel: Processing {content}")
         
         # Hardcoded connection: Motor -> Expression
         try:

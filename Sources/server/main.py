@@ -92,7 +92,7 @@ async def main():
     """Main function to run the server."""
     # Check for required environment variables
     if not os.getenv("OPENAI_API_KEY"):
-        print("❌ Error: OPENAI_API_KEY environment variable not set")
+        print("Error: OPENAI_API_KEY environment variable not set")
         print("Please set your OpenAI API key:")
         print("export OPENAI_API_KEY='your-api-key-here'")
         sys.exit(1)
@@ -108,9 +108,9 @@ async def main():
         await server.initialize()
         await server.start()
     except KeyboardInterrupt:
-        print("\n🛑 Server interrupted by user")
+        print("\nServer interrupted by user")
     except Exception as e:
-        print(f"❌ Server failed: {e}")
+        print(f"Server failed: {e}")
         sys.exit(1)
 
 
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     if sys.platform != "win32":
         uvloop.install()
     
-    print("🐍 SwiftCog Python Server")
+    print("SwiftCog Python Server")
     print("=" * 50)
     
     # Run the server

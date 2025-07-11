@@ -143,7 +143,7 @@ public class GazeTracker: NSObject, ObservableObject {
             return
         }
         
-        // Create structured gaze data payload
+        // Create structured gaze data payload in new format
         let gazeData: [String: Any] = [
             "messageType": "gazeData",
             "lookingAtScreen": lookingAtScreen,

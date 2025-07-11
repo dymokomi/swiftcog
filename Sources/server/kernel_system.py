@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 import ray
-from swiftcog_types import KernelID, KernelMessage, AsyncMessage, MessageType
+from swiftcog_types import KernelID, KernelMessage, AsyncMessage, MessageType, TextMessage, GazeMessage, VoiceMessage
 from kernels import (
     SensingKernel,
     ExecutiveKernel,
@@ -84,9 +84,21 @@ class KernelSystemActor:
         print("Backend queuing message for frontend")
         self.outgoing_messages.append(message)
     
+    def get_message_summary(self, message: KernelMessage) -> str:
+        """Get a readable summary of the message content."""
+        if isinstance(message, TextMessage):
+            return f"text: '{message.content}'"
+        elif isinstance(message, GazeMessage):
+            return f"gaze: looking={message.looking_at_screen}"
+        elif isinstance(message, VoiceMessage):
+            return f"voice: '{message.transcription}'"
+        else:
+            return f"{message.get_message_type()}: {type(message).__name__}"
+
     async def handle_message(self, message: KernelMessage) -> None:
         """Handle incoming message from frontend."""
-        print(f"KernelSystemActor.handle_message() - Message: {message.source_kernel_id.value} -> '{message.payload}'")
+        message_summary = self.get_message_summary(message)
+        print(f"KernelSystemActor.handle_message() - Message: {message.source_kernel_id.value} -> {message_summary}")
         
         # Route message to sensing kernel (hardcoded connection from GUI)
         print("Backend routing message to SensingKernel")
@@ -105,22 +117,13 @@ class KernelSystemActor:
     async def create_default_kernels(self) -> None:
         """Create the default kernel system with hardcoded connections."""
         print("Creating default kernels...")
-        
-        # Create all kernels with their built-in logic (no custom handlers needed)
+
         sensing_kernel = await self.create_sensing_kernel()
         executive_kernel = await self.create_executive_kernel()
         motor_kernel = await self.create_motor_kernel()
         expression_kernel = await self.create_expression_kernel()
         memory_kernel = await self.create_memory_kernel()
         learning_kernel = await self.create_learning_kernel()
-        
-        print("Default kernels created with hardcoded connections:")
-        print("   Sensing -> Executive")
-        print("   Executive -> Motor") 
-        print("   Motor -> Expression")
-        print("   Expression -> GUI")
-        print("   Executive -> Learning")
-        print("   Learning -> Memory")
 
 
 class KernelSystem:

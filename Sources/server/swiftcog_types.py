@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional, Union
 from pydantic import BaseModel
+from abc import ABC, abstractmethod
 import uuid
 import json
 
@@ -22,35 +23,201 @@ class KernelID(Enum):
 
 
 @dataclass
-class KernelMessage:
-    """Kernel message structure matching the Swift implementation."""
+class KernelMessage(ABC):
+    """Abstract base class for all kernel messages."""
     id: str
     source_kernel_id: KernelID
-    payload: str
     timestamp: datetime
     
-    def __init__(self, source_kernel_id: KernelID, payload: str, message_id: Optional[str] = None):
+    def __init__(self, source_kernel_id: KernelID, message_id: Optional[str] = None):
         self.id = message_id or str(uuid.uuid4())
         self.source_kernel_id = source_kernel_id
-        self.payload = payload
         self.timestamp = datetime.now()
     
+    @abstractmethod
+    def get_message_type(self) -> str:
+        """Get the message type identifier."""
+        pass
+    
+    @abstractmethod
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
+        pass
+    
+    def get_base_dict(self) -> Dict[str, Any]:
+        """Get base dictionary with common fields."""
         return {
             "id": self.id,
             "sourceKernelId": self.source_kernel_id.value,
-            "payload": self.payload,
-            "timestamp": self.timestamp.isoformat()
+            "timestamp": self.timestamp.isoformat(),
+            "messageType": self.get_message_type()
         }
+
+
+@dataclass
+class GazeMessage(KernelMessage):
+    """Message containing gaze tracking data."""
+    looking_at_screen: bool
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'KernelMessage':
-        """Create from dictionary for JSON deserialization."""
-        return cls(
-            source_kernel_id=KernelID(data["sourceKernelId"]),
-            payload=data["payload"],
-            message_id=data.get("id")
+    def __init__(self, source_kernel_id: KernelID, looking_at_screen: bool, message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.looking_at_screen = looking_at_screen
+    
+    def get_message_type(self) -> str:
+        return "gazeData"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "lookingAtScreen": self.looking_at_screen
+        })
+        return result
+
+
+@dataclass
+class VoiceMessage(KernelMessage):
+    """Message containing voice/speech data."""
+    transcription: str
+    confidence: Optional[float] = None
+    
+    def __init__(self, source_kernel_id: KernelID, transcription: str, confidence: Optional[float] = None, message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.transcription = transcription
+        self.confidence = confidence
+    
+    def get_message_type(self) -> str:
+        return "voiceData"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "transcription": self.transcription
+        })
+        if self.confidence is not None:
+            result["confidence"] = self.confidence
+        return result
+
+
+@dataclass
+class ThoughtMessage(KernelMessage):
+    """Message containing thought/reasoning data."""
+    content: str
+    
+    def __init__(self, source_kernel_id: KernelID, content: str, message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.content = content
+    
+    def get_message_type(self) -> str:
+        return "thoughtData"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "content": self.content
+        })
+        return result
+
+
+@dataclass
+class UIMessage(KernelMessage):
+    """Message containing UI-related data."""
+    content: str
+    
+    def __init__(self, source_kernel_id: KernelID, content: str, message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.content = content
+    
+    def get_message_type(self) -> str:
+        return "uiData"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "content": self.content
+        })
+        return result
+
+
+@dataclass
+class TextMessage(KernelMessage):
+    """Message containing plain text data (for backward compatibility)."""
+    content: str
+    
+    def __init__(self, source_kernel_id: KernelID, content: str, message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.content = content
+    
+    def get_message_type(self) -> str:
+        return "textData"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "content": self.content,
+            "payload": self.content  # For backward compatibility
+        })
+        return result
+
+
+def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
+    """Factory method to create the appropriate KernelMessage subclass from dictionary."""
+    source_kernel_id = KernelID(data["sourceKernelId"])
+    message_id = data.get("id")
+    
+    # Handle legacy format (with payload field)
+    if "payload" in data and "messageType" not in data:
+        # Try to parse payload as JSON to determine message type
+        try:
+            payload_data = json.loads(data["payload"])
+            if payload_data.get("messageType") == "gazeData":
+                return GazeMessage(
+                    source_kernel_id=source_kernel_id,
+                    looking_at_screen=payload_data.get("lookingAtScreen", False),
+                    message_id=message_id
+                )
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        
+        # Default to TextMessage for backward compatibility
+        return TextMessage(
+            source_kernel_id=source_kernel_id,
+            content=data["payload"],
+            message_id=message_id
+        )
+    
+    # Handle new structured format
+    message_type = data.get("messageType", "textData")
+    
+    if message_type == "gazeData":
+        return GazeMessage(
+            source_kernel_id=source_kernel_id,
+            looking_at_screen=data.get("lookingAtScreen", False),
+            message_id=message_id
+        )
+    elif message_type == "voiceData":
+        return VoiceMessage(
+            source_kernel_id=source_kernel_id,
+            transcription=data.get("transcription", ""),
+            confidence=data.get("confidence"),
+            message_id=message_id
+        )
+    elif message_type == "thoughtData":
+        return ThoughtMessage(
+            source_kernel_id=source_kernel_id,
+            content=data.get("content", ""),
+            message_id=message_id
+        )
+    elif message_type == "uiData":
+        return UIMessage(
+            source_kernel_id=source_kernel_id,
+            content=data.get("content", ""),
+            message_id=message_id
+        )
+    else:  # textData or unknown
+        return TextMessage(
+            source_kernel_id=source_kernel_id,
+            content=data.get("content", data.get("payload", "")),
+            message_id=message_id
         )
 
 
@@ -83,7 +250,7 @@ class AsyncMessage:
         """Create from dictionary for JSON deserialization."""
         return cls(
             type=data["type"],
-            kernel_message=KernelMessage.from_dict(data["kernelMessage"]) if "kernelMessage" in data else None,
+            kernel_message=create_kernel_message_from_dict(data["kernelMessage"]) if "kernelMessage" in data else None,
             app_code=data.get("appCode"),
             app_name=data.get("appName"),
             error_message=data.get("errorMessage")
@@ -176,5 +343,5 @@ class WebSocketMessage(BaseModel):
     def get_kernel_message(self) -> Optional[KernelMessage]:
         """Extract KernelMessage from the dictionary."""
         if self.kernel_message:
-            return KernelMessage.from_dict(self.kernel_message)
+            return create_kernel_message_from_dict(self.kernel_message)
         return None 
