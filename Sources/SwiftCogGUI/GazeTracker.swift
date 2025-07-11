@@ -11,11 +11,16 @@ public class GazeTracker: NSObject, ObservableObject {
     
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "gaze.tracker.queue")
-    private lazy var request: VNDetectFaceLandmarksRequest = {
+    private lazy var faceLandmarksRequest: VNDetectFaceLandmarksRequest = {
         VNDetectFaceLandmarksRequest(completionHandler: handleFaces)
     }()
     
+    private lazy var featurePrintRequest: VNGenerateImageFeaturePrintRequest = {
+        VNGenerateImageFeaturePrintRequest(completionHandler: handleFeaturePrint)
+    }()
+    
     private var isStarted = false
+    private var currentFeatureVector: [Float]?
     
     public override init() {
         super.init()
@@ -98,7 +103,7 @@ public class GazeTracker: NSObject, ObservableObject {
         print("GazeTracker: Stopped gaze tracking")
     }
     
-    // MARK: Vision callback
+    // MARK: Vision callbacks
     private func handleFaces(request: VNRequest, error: Error?) {
         guard error == nil else {
             print("GazeTracker: Vision error: \(error!)")
@@ -117,6 +122,27 @@ public class GazeTracker: NSObject, ObservableObject {
         // Heuristic: ±14° = 0.25 rad (same as example)
         let isLooking = abs(yaw) < 0.25
         updateLookingState(isLooking)
+    }
+    
+    private func handleFeaturePrint(request: VNRequest, error: Error?) {
+        guard error == nil else {
+            print("GazeTracker: Feature print error: \(error!)")
+            currentFeatureVector = nil
+            return
+        }
+        
+        guard let observation = request.results?.first as? VNFeaturePrintObservation else {
+            currentFeatureVector = nil
+            return
+        }
+        
+        // Extract the feature vector data
+        let featureData = observation.data
+        let featureVector = featureData.withUnsafeBytes { buffer in
+            return Array(buffer.bindMemory(to: Float.self))
+        }
+        
+        currentFeatureVector = featureVector
     }
     
     private func updateLookingState(_ newValue: Bool) {
@@ -144,11 +170,17 @@ public class GazeTracker: NSObject, ObservableObject {
         }
         
         // Create structured gaze data payload in new format
-        let gazeData: [String: Any] = [
+        var gazeData: [String: Any] = [
             "messageType": "gazeData",
             "lookingAtScreen": lookingAtScreen,
             "timestamp": timestamp
         ]
+        
+        // Add feature vector if available
+        if let featureVector = currentFeatureVector {
+            gazeData["featureVector"] = featureVector
+            gazeData["featureVectorDimensions"] = featureVector.count
+        }
         
         // Convert to JSON string
         do {
@@ -159,7 +191,8 @@ public class GazeTracker: NSObject, ObservableObject {
             Task {
                 do {
                     try await kernelSystem.sendToBackend(jsonString)
-                    print("[\(timestamp)] GazeTracker: Sent gaze data - looking: \(lookingAtScreen)")
+                    let featureInfo = currentFeatureVector != nil ? " with \(currentFeatureVector!.count)D feature vector" : ""
+                    print("[\(timestamp)] GazeTracker: Sent gaze data - looking: \(lookingAtScreen)\(featureInfo)")
                 } catch {
                     print("[\(timestamp)] GazeTracker: Failed to send gaze data: \(error)")
                 }
@@ -179,6 +212,6 @@ extension GazeTracker: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
-        try? handler.perform([request])
+        try? handler.perform([faceLandmarksRequest, featurePrintRequest])
     }
 } 

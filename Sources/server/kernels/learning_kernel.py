@@ -4,18 +4,15 @@ Learning kernel implementation for the SwiftCog Python server.
 from typing import Callable, Optional
 import ray
 from swiftcog_types import KernelID, KernelMessage, TextMessage
+from .base_kernel import BaseKernel
 
 
 @ray.remote
-class LearningKernel:
+class LearningKernel(BaseKernel):
     """Learning kernel implementation matching the Swift version."""
     
     def __init__(self, custom_handler: Optional[Callable] = None):
-        self.custom_handler = custom_handler
-        self.kernel_id = KernelID.LEARNING
-    
-    def get_kernel_id(self) -> KernelID:
-        return self.kernel_id
+        super().__init__(KernelID.LEARNING, custom_handler)
     
     async def receive(self, message: KernelMessage) -> None:
         """Default handler that processes learning and forwards directly to Memory."""

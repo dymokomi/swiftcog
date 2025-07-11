@@ -58,10 +58,16 @@ class KernelMessage(ABC):
 class GazeMessage(KernelMessage):
     """Message containing gaze tracking data."""
     looking_at_screen: bool
+    feature_vector: Optional[list] = None
+    feature_vector_dimensions: Optional[int] = None
     
-    def __init__(self, source_kernel_id: KernelID, looking_at_screen: bool, message_id: Optional[str] = None):
+    def __init__(self, source_kernel_id: KernelID, looking_at_screen: bool, 
+                 feature_vector: Optional[list] = None, feature_vector_dimensions: Optional[int] = None,
+                 message_id: Optional[str] = None):
         super().__init__(source_kernel_id, message_id)
         self.looking_at_screen = looking_at_screen
+        self.feature_vector = feature_vector
+        self.feature_vector_dimensions = feature_vector_dimensions
     
     def get_message_type(self) -> str:
         return "gazeData"
@@ -71,6 +77,9 @@ class GazeMessage(KernelMessage):
         result.update({
             "lookingAtScreen": self.looking_at_screen
         })
+        if self.feature_vector is not None:
+            result["featureVector"] = self.feature_vector
+            result["featureVectorDimensions"] = self.feature_vector_dimensions
         return result
 
 
@@ -173,6 +182,8 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
                 return GazeMessage(
                     source_kernel_id=source_kernel_id,
                     looking_at_screen=payload_data.get("lookingAtScreen", False),
+                    feature_vector=payload_data.get("featureVector"),
+                    feature_vector_dimensions=payload_data.get("featureVectorDimensions"),
                     message_id=message_id
                 )
         except (json.JSONDecodeError, AttributeError):
@@ -192,6 +203,8 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
         return GazeMessage(
             source_kernel_id=source_kernel_id,
             looking_at_screen=data.get("lookingAtScreen", False),
+            feature_vector=data.get("featureVector"),
+            feature_vector_dimensions=data.get("featureVectorDimensions"),
             message_id=message_id
         )
     elif message_type == "voiceData":
