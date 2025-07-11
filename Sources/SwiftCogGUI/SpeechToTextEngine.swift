@@ -16,7 +16,7 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
     
     // Hybrid VAD-based silence detection
     private var silenceTimer: Timer?
-    private let silenceThreshold: TimeInterval = 1.2 // 1200ms as requested
+    private let silenceThreshold: TimeInterval = 2.5 // Allow longer pauses during natural speech
     private var lastTranscriptionUpdateTime = Date()
     private var lastTranscriptionContent = ""
     private var hasSpeechBeenDetected = false
@@ -208,7 +208,7 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 512, format: recordingFormat) { buffer, _ in
             recognitionRequest.append(buffer)
         }
         
@@ -262,7 +262,7 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
             guard let self = self else { return }
             
             self.silenceTimer?.invalidate()
-            self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
                 
                 let formatter = DateFormatter()
@@ -271,15 +271,7 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
                 
                 // Check if transcription has stopped updating for the threshold period
                 let timeSinceLastUpdate = Date().timeIntervalSince(self.lastTranscriptionUpdateTime)
-                
-                // Only log when there's speech activity or every 30 seconds to confirm timer is alive
-                let transcription = self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
-                let shouldLog = !transcription.isEmpty || self.hasSpeechBeenDetected || Int(timeSinceLastUpdate) % 30 == 0
-                
-                if shouldLog {
-                    print("[\(timestamp)] Timer check: speechDetected=\(self.hasSpeechBeenDetected), hasContent=\(!transcription.isEmpty), timeSinceUpdate=\(String(format: "%.1f", timeSinceLastUpdate))s, threshold=\(self.silenceThreshold)s, listening=\(self.isListening)")
-                }
-                
+
                 // Check if we have speech content and haven't had updates recently
                 if self.hasSpeechBeenDetected && 
                    !self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -312,9 +304,9 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         if trimmedText != lastTranscriptionContent && !trimmedText.isEmpty {
             lastTranscriptionUpdateTime = Date()
             lastTranscriptionContent = trimmedText
-            print("[\(timestamp)] SpeechToTextEngine: Transcription updated: '\(trimmedText)'")
+            //print("[\(timestamp)] SpeechToTextEngine: Transcription updated: '\(trimmedText)'")
         } else if !trimmedText.isEmpty {
-            print("[\(timestamp)] SpeechToTextEngine: Transcription refinement (no content change): '\(trimmedText)'")
+            //print("[\(timestamp)] SpeechToTextEngine: Transcription refinement (no content change): '\(trimmedText)'")
         }
         
         currentTranscription = text
