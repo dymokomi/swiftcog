@@ -1,276 +1,255 @@
 import Foundation
 import AVFoundation
-import OpenAIKit
+import Speech
 
-public class SpeechToTextEngine {
-    private let apiKey: String
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var audioEngine: AVAudioEngine?
-    private var inputNode: AVAudioInputNode?
-    private var isRecording = false
-    private let sampleRate: Double = 24000
-    private let chunkDuration: Double = 0.1 // 100ms chunks
+public class SpeechToTextEngine: NSObject, ObservableObject {
+    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private let audioEngine = AVAudioEngine()
+    
+    // Real-time transcription state
+    @Published public var currentTranscription = ""
+    @Published public var isListening = false
+    
+    // Native VAD-based silence detection
+    private var silenceTimer: Timer?
+    private let silenceThreshold: TimeInterval = 1.2 // 1200ms as requested
+    private var lastTranscriptionTime = Date()
+    private var previousTranscription = ""
+    
+    // Completion handlers
+    private var onFinalTranscription: ((String) -> Void)?
+    private var onTranscriptionUpdate: ((String) -> Void)?
     
     public enum EngineError: Error {
-        case transcriptionFailed
-        case webSocketError(Error)
+        case speechRecognitionNotAvailable
         case audioEngineError(Error)
-        case invalidAPIKey
+        case speechRecognitionError(Error)
+        case permissionDenied
     }
     
-    public init(apiKey: String) {
-        self.apiKey = apiKey
+    public override init() {
+        super.init()
+        setupSpeechRecognizer()
     }
     
-    public func start() -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    try await self.startRealtimeSession(continuation: continuation)
-                } catch {
-                    continuation.finish(throwing: error)
+    private func setupSpeechRecognizer() {
+        speechRecognizer?.delegate = self
+        
+        // Request speech recognition authorization
+        SFSpeechRecognizer.requestAuthorization { authStatus in
+            DispatchQueue.main.async {
+                switch authStatus {
+                case .authorized:
+                    print("SpeechToTextEngine: Speech recognition authorized")
+                case .denied:
+                    print("SpeechToTextEngine: Speech recognition access denied")
+                case .restricted:
+                    print("SpeechToTextEngine: Speech recognition restricted")
+                case .notDetermined:
+                    print("SpeechToTextEngine: Speech recognition not determined")
+                @unknown default:
+                    print("SpeechToTextEngine: Unknown authorization status")
                 }
+            }
+        }
+        
+        // On macOS, microphone permission is handled automatically by the system
+    }
+    
+    public func startListening(
+        onTranscriptionUpdate: @escaping (String) -> Void,
+        onFinalTranscription: @escaping (String) -> Void
+    ) throws {
+        // Check permissions
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+            throw EngineError.permissionDenied
+        }
+        
+        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
+            throw EngineError.speechRecognitionNotAvailable
+        }
+        
+        // Store completion handlers
+        self.onTranscriptionUpdate = onTranscriptionUpdate
+        self.onFinalTranscription = onFinalTranscription
+        
+        // Cancel any previous recognition task
+        stopListening()
+        
+        // On macOS, audio configuration is handled automatically
+        
+        // Create recognition request with live transcription
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        guard let recognitionRequest = recognitionRequest else {
+            throw EngineError.speechRecognitionError(NSError(domain: "SpeechEngine", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to create recognition request"]))
+        }
+        
+        // Enable live transcription and context-aware recognition
+        recognitionRequest.shouldReportPartialResults = true
+        if #available(macOS 13.0, *) {
+            recognitionRequest.addsPunctuation = true
+            recognitionRequest.requiresOnDeviceRecognition = false // Use cloud for better accuracy
+        }
+        
+        // Set up audio engine
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            recognitionRequest.append(buffer)
+        }
+        
+        // Start audio engine
+        audioEngine.prepare()
+        try audioEngine.start()
+        
+        // Start recognition task with delegate for VAD
+        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest, delegate: self)
+        
+        isListening = true
+        currentTranscription = ""
+        previousTranscription = ""
+        lastTranscriptionTime = Date()
+        startSilenceTimer()
+        
+        print("SpeechToTextEngine: Started listening with native VAD")
+    }
+    
+    public func stopListening() {
+        // Stop audio engine
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        
+        // Cancel recognition
+        recognitionRequest?.endAudio()
+        recognitionTask?.cancel()
+        
+        recognitionRequest = nil
+        recognitionTask = nil
+        
+        // Stop silence timer
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        
+        isListening = false
+        
+        print("SpeechToTextEngine: Stopped listening")
+    }
+    
+    private func startSilenceTimer() {
+        silenceTimer?.invalidate()
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
+            let timeSinceLastUpdate = Date().timeIntervalSince(self.lastTranscriptionTime)
+            
+            // Only proceed if we have some transcription and haven't had updates recently
+            if timeSinceLastUpdate >= self.silenceThreshold 
+                && !self.currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && self.isListening {
+                
+                print("SpeechToTextEngine: VAD silence detected (\(String(format: "%.1f", timeSinceLastUpdate))s), finalizing: '\(self.currentTranscription)'")
+                self.handleSilenceDetected()
             }
         }
     }
     
-    private func startRealtimeSession(continuation: AsyncThrowingStream<String, Error>.Continuation) async throws {
-        // Create WebSocket connection to OpenAI Realtime API
-        let model = "gpt-4o-mini-realtime-preview-2024-12-17"
-        let wsURL = URL(string: "wss://api.openai.com/v1/realtime?model=\(model)")!
+    private func updateTranscription(_ text: String) {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        var request = URLRequest(url: wsURL)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+        // Only update timer if transcription actually changed
+        if trimmedText != previousTranscription {
+            lastTranscriptionTime = Date()
+            previousTranscription = trimmedText
+            print("SpeechToTextEngine: Transcription updated: '\(trimmedText)'")
+        }
         
-        let webSocketTask = URLSession.shared.webSocketTask(with: request)
-        self.webSocketTask = webSocketTask
-        
-        webSocketTask.resume()
-        
-        print("SpeechToTextEngine: Connecting to OpenAI Realtime API...")
-        
-        // Start receiving messages
-        await receiveMessages(continuation: continuation)
+        currentTranscription = text
+        onTranscriptionUpdate?(text)
     }
     
-    private func receiveMessages(continuation: AsyncThrowingStream<String, Error>.Continuation) async {
-        guard let webSocketTask = webSocketTask else { return }
+    private func handleSilenceDetected() {
+        let finalText = currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !finalText.isEmpty else { return }
         
-        Task {
+        // Stop listening and timer
+        silenceTimer?.invalidate()
+        stopListening()
+        
+        // Clear current transcription
+        currentTranscription = ""
+        previousTranscription = ""
+        
+        // Call the completion handler
+        onFinalTranscription?(finalText)
+        
+        // Restart listening after a brief delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            
             do {
-                while true {
-                    let message = try await webSocketTask.receive()
-                    
-                    switch message {
-                    case .string(let text):
-                        await handleWebSocketMessage(text, continuation: continuation)
-                    case .data(let data):
-                        if let text = String(data: data, encoding: .utf8) {
-                            await handleWebSocketMessage(text, continuation: continuation)
-                        }
-                    @unknown default:
-                        break
-                    }
-                }
+                try self.startListening(
+                    onTranscriptionUpdate: self.onTranscriptionUpdate ?? { _ in },
+                    onFinalTranscription: self.onFinalTranscription ?? { _ in }
+                )
             } catch {
-                continuation.finish(throwing: EngineError.webSocketError(error))
+                print("SpeechToTextEngine: Error restarting listening: \(error)")
             }
         }
     }
-    
-    private func handleWebSocketMessage(_ text: String, continuation: AsyncThrowingStream<String, Error>.Continuation) async {
-        guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let eventType = json["type"] as? String else {
-            return
-        }
+}
 
-        switch eventType {
-        case "session.created":
-            print("SpeechToTextEngine: Session created, sending configuration...")
-            
-            // Send session configuration
-            let sessionConfig: [String: Any] = [
-                "type": "session.update",
-                "session": [
-                    "input_audio_format": "pcm16",
-                    "input_audio_transcription": ["model": "whisper-1"],
-                    "turn_detection": [
-                        "type": "server_vad",
-                        "silence_duration_ms": 800
-                    ],
-                    "instructions": "You are a speech-to-text service. Only transcribe speech, do not respond or generate audio.",
-                    "modalities": ["text"]
-                ]
-            ]
-            
-            do {
-                try await sendMessage(sessionConfig)
-            } catch {
-                continuation.finish(throwing: EngineError.webSocketError(error))
-            }
-            
-        case "session.updated":
-            print("SpeechToTextEngine: Session configured, starting audio streaming...")
-            
-            // Start audio streaming
-            do {
-                try await startAudioStreaming()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-            
-        case "conversation.item.input_audio_transcription.completed":
-            if let transcript = json["transcript"] as? String {
-                print("SpeechToTextEngine: Transcript: \(transcript)")
-                continuation.yield(transcript)
-            }
-            
-        case "input_audio_buffer.speech_started":
-            print("SpeechToTextEngine: Speech started")
-            
-        case "input_audio_buffer.speech_stopped":
-            print("SpeechToTextEngine: Speech stopped")
-            
-        case "error":
-            print("SpeechToTextEngine: OpenAI API error: \(json)")
-            continuation.finish(throwing: EngineError.transcriptionFailed)
-            
-        default:
-            // Ignore other event types (like response generation events)
-            break
-        }
-    }
-    
-    private func sendMessage(_ message: [String: Any]) async throws {
-        guard let webSocketTask = webSocketTask else { return }
-        
-        let jsonData = try JSONSerialization.data(withJSONObject: message)
-        let jsonString = String(data: jsonData, encoding: .utf8)!
-        
-        try await webSocketTask.send(.string(jsonString))
-    }
-    
-    private func startAudioStreaming() async throws {
-        audioEngine = AVAudioEngine()
-        
-        guard let audioEngine = audioEngine else {
-            throw EngineError.audioEngineError(NSError(domain: "AudioEngine", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio engine"]))
-        }
-        
-        inputNode = audioEngine.inputNode
-        
-        guard let inputNode = inputNode else {
-            throw EngineError.audioEngineError(NSError(domain: "AudioEngine", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to get input node"]))
-        }
-        
-        // Use the input node's hardware format for the tap
-        let inputFormat = inputNode.inputFormat(forBus: 0)
-        
-        // Calculate buffer size based on the input format's sample rate
-        let bufferSize = UInt32(inputFormat.sampleRate * chunkDuration) // 100ms chunks
-        
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] (buffer, time) in
-            Task {
-                await self?.sendAudioChunk(buffer: buffer)
+// MARK: - SFSpeechRecognizerDelegate
+extension SpeechToTextEngine: SFSpeechRecognizerDelegate {
+    public func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
+        DispatchQueue.main.async {
+            if available {
+                print("SpeechToTextEngine: Speech recognizer became available")
+            } else {
+                print("SpeechToTextEngine: Speech recognizer became unavailable")
+                self.stopListening()
             }
         }
-        
-        do {
-            try audioEngine.start()
-            isRecording = true
-            print("SpeechToTextEngine: Audio streaming started")
-        } catch {
-            throw EngineError.audioEngineError(error)
+    }
+}
+
+// MARK: - SFSpeechRecognitionTaskDelegate (Native VAD)
+extension SpeechToTextEngine: SFSpeechRecognitionTaskDelegate {
+    public func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didHypothesizeTranscription transcription: SFTranscription) {
+        DispatchQueue.main.async {
+            let text = transcription.formattedString
+            self.updateTranscription(text)
         }
     }
     
-    private func sendAudioChunk(buffer: AVAudioPCMBuffer) async {
-        guard webSocketTask != nil else { return }
-        
-        // Convert the buffer to PCM16 format at 24kHz if needed
-        guard let convertedBuffer = convertToRequiredFormat(buffer: buffer) else {
-            print("SpeechToTextEngine: Failed to convert audio buffer")
-            return
-        }
-        
-        guard let channelData = convertedBuffer.int16ChannelData else {
-            print("SpeechToTextEngine: No channel data available")
-            return
-        }
-        
-        let frameLength = Int(convertedBuffer.frameLength)
-        let data = Data(bytes: channelData[0], count: frameLength * 2) // 2 bytes per sample for int16
-        
-        let base64Audio = data.base64EncodedString()
-        
-        let audioMessage: [String: Any] = [
-            "type": "input_audio_buffer.append",
-            "audio": base64Audio
-        ]
-        
-        do {
-            try await sendMessage(audioMessage)
-        } catch {
-            print("SpeechToTextEngine: Error sending audio chunk: \(error)")
+    public func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didFinishRecognition recognitionResult: SFSpeechRecognitionResult) {
+        DispatchQueue.main.async {
+            let text = recognitionResult.bestTranscription.formattedString
+            print("SpeechToTextEngine: Final recognition result: '\(text)'")
+            self.updateTranscription(text)
+            
+            if recognitionResult.isFinal {
+                // Don't auto-finalize here - let our silence timer handle it
+                // This prevents premature finalization during natural speech pauses
+            }
         }
     }
     
-    private func convertToRequiredFormat(buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        // Target format: PCM16, 24kHz, mono
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: sampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            return nil
+    public func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didFinishSuccessfully successfully: Bool) {
+        DispatchQueue.main.async {
+            if successfully {
+                print("SpeechToTextEngine: Recognition finished successfully")
+            } else {
+                print("SpeechToTextEngine: Recognition finished with issues")
+            }
         }
-        
-        // If the buffer is already in the correct format, return it
-        if buffer.format.isEqual(targetFormat) {
-            return buffer
-        }
-        
-        // Create converter
-        guard let converter = AVAudioConverter(from: buffer.format, to: targetFormat) else {
-            return nil
-        }
-        
-        // Calculate the capacity needed for the converted buffer
-        let capacity = UInt32(Double(buffer.frameLength) * targetFormat.sampleRate / buffer.format.sampleRate)
-        
-        guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
-            return nil
-        }
-        
-        var error: NSError?
-        converter.convert(to: convertedBuffer, error: &error) { inNumPackets, outStatus in
-            outStatus.pointee = .haveData
-            return buffer
-        }
-        
-        if let error = error {
-            print("SpeechToTextEngine: Audio conversion error: \(error)")
-            return nil
-        }
-        
-        return convertedBuffer
     }
     
-    public func stop() {
-        isRecording = false
-        
-        if let inputNode = inputNode {
-            inputNode.removeTap(onBus: 0)
+    public func speechRecognitionTaskWasCancelled(_ task: SFSpeechRecognitionTask) {
+        DispatchQueue.main.async {
+            print("SpeechToTextEngine: Recognition task was cancelled")
         }
-        
-        audioEngine?.stop()
-        
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
-        
-        print("SpeechToTextEngine: Stopped")
     }
 } 

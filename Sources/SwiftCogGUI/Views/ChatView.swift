@@ -287,12 +287,22 @@ struct ChatWebViewWrapper: NSViewRepresentable {
 // MARK: - Main Chat View
 struct ChatView: View {
     @ObservedObject var controller: ChatController
+    @ObservedObject var speechEngine: SpeechToTextEngine
     
-    init(controller: ChatController) {
+    init(controller: ChatController, speechEngine: SpeechToTextEngine) {
         self.controller = controller
+        self.speechEngine = speechEngine
     }
     
     var body: some View {
-        ChatWebViewWrapper(controller: controller)
+        ZStack {
+            ChatWebViewWrapper(controller: controller)
+            
+            // Transcription overlay on top
+            TranscriptionOverlay(
+                transcription: speechEngine.currentTranscription,
+                isListening: speechEngine.isListening
+            )
+        }
     }
 } 

@@ -26,7 +26,7 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
             }
             
             // Create SpeechToTextEngine for speech input
-            speechEngine = SpeechToTextEngine(apiKey: getAPIKey())
+            speechEngine = SpeechToTextEngine()
             
             // Start the kernel system background tasks
             let _ = system.run()
@@ -60,7 +60,7 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
         
         // Create the main chat view
-        let chatView = ChatView(controller: chatController!)
+        let chatView = ChatView(controller: chatController!, speechEngine: speechEngine!)
         
         // Create the window
         window = NSWindow(
@@ -88,28 +88,26 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
         
         do {
             print("Starting speech recognition...")
-            for try await speechText in speechEngine.start() {
-                print("GUI: Speech input: '\(speechText)'")
-                
-                // Handle speech input directly in GUI
-                await MainActor.run {
-                    self.chatController?.handleUserMessage(speechText)
+            try speechEngine.startListening(
+                onTranscriptionUpdate: { transcription in
+                    // Real-time transcription updates are handled by the overlay view
+                    // No need to do anything here as the UI is bound to speechEngine.currentTranscription
+                },
+                onFinalTranscription: { finalText in
+                    print("GUI: Final speech input: '\(finalText)'")
+                    
+                    // Handle final speech input
+                    Task { @MainActor in
+                        self.chatController?.handleUserMessage(finalText)
+                    }
                 }
-            }
+            )
         } catch {
             print("Speech recognition error: \(error)")
         }
     }
     
-    private func getAPIKey() -> String {
-        // Try environment variable first
-        if let envKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] {
-            return envKey
-        }
-        
-        // Fallback to default (this should be set in your environment)
-        return ""
-    }
+
 }
 
 // Window delegate to handle window close events
