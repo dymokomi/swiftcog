@@ -1,18 +1,16 @@
 import SwiftUI
 import WebKit
-import Foundation
 import SwiftCogCore
 
 // MARK: - Chat Message Model
-struct ChatMessage: Codable, Identifiable {
-    let id: String
-    let content: String
+struct ChatMessage {
+    let id = UUID()
+    let text: String
     let isUser: Bool
     let timestamp: Date
     
-    init(content: String, isUser: Bool) {
-        self.id = UUID().uuidString
-        self.content = content
+    init(text: String, isUser: Bool) {
+        self.text = text
         self.isUser = isUser
         self.timestamp = Date()
     }
@@ -20,127 +18,171 @@ struct ChatMessage: Codable, Identifiable {
 
 // MARK: - Chat Controller
 class ChatController: ObservableObject {
-    @Published var messages: [ChatMessage] = []
     private var webView: WKWebView?
-    private var onUserMessage: ((String) -> Void)?
+    private let onUserMessage: (String) -> Void
     
     init(onUserMessage: @escaping (String) -> Void) {
         self.onUserMessage = onUserMessage
     }
     
-    func setup(webView: WKWebView) {
+    func setWebView(_ webView: WKWebView) {
         self.webView = webView
-    }
-    
-    // Handle display commands from backend
-    func handleDisplayCommand(_ command: DisplayCommand) {
-        DispatchQueue.main.async {
-            switch command.type {
-            case .textBubble:
-                if let cmd = command as? TextBubbleCommand {
-                    self.addTextBubble(cmd.text, isUser: cmd.isUser)
-                }
-            case .clearScreen:
-                self.clearMessages()
-            case .highlightText:
-                if let cmd = command as? HighlightTextCommand {
-                    self.highlightText(cmd.text, color: cmd.highlightColor)
-                }
-            case .displayList:
-                if let cmd = command as? DisplayListCommand {
-                    self.displayList(cmd.items, allowSelection: cmd.allowSelection)
-                }
-            case .showThinking:
-                self.showThinking()
-            case .hideThinking:
-                self.hideThinking()
-            case .updateStatus:
-                if let cmd = command as? UpdateStatusCommand {
-                    self.updateStatus(cmd.status)
-                }
-            case .showMessage: // Legacy support
-                if let cmd = command as? ShowMessageCommand {
-                    self.addTextBubble(cmd.message, isUser: cmd.isUser)
-                }
-            }
-        }
-    }
-    
-    private func addTextBubble(_ content: String, isUser: Bool) {
-        let message = ChatMessage(content: content, isUser: isUser)
-        messages.append(message)
-        
-        // Update WebView
-        let escapedContent = content.replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        
-        let script = "addTextBubble(\"\(escapedContent)\", \(isUser));"
-        webView?.evaluateJavaScript(script) { _, error in
-            if let error = error {
-                print("❌ ChatController: JavaScript error: \(error)")
-            }
-        }
-    }
-    
-    private func addMessage(_ content: String, isUser: Bool) {
-        // Deprecated - use addTextBubble instead
-        addTextBubble(content, isUser: isUser)
-    }
-    
-    private func clearMessages() {
-        messages.removeAll()
-        webView?.evaluateJavaScript("clearScreen();")
-    }
-    
-    private func highlightText(_ text: String, color: String) {
-        let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        let escapedColor = color.replacingOccurrences(of: "\"", with: "\\\"")
-        
-        let script = "highlightText(\"\(escapedText)\", \"\(escapedColor)\");"
-        webView?.evaluateJavaScript(script) { _, error in
-            if let error = error {
-                print("❌ ChatController: JavaScript error: \(error)")
-            }
-        }
-    }
-    
-    private func displayList(_ items: [ListItem], allowSelection: Bool) {
-        do {
-            let encoder = JSONEncoder()
-            let itemsData = try encoder.encode(items)
-            let itemsJson = String(data: itemsData, encoding: .utf8) ?? "[]"
-            
-            let script = "displayList(\(itemsJson), \(allowSelection));"
-            webView?.evaluateJavaScript(script) { _, error in
-                if let error = error {
-                    print("❌ ChatController: JavaScript error: \(error)")
-                }
-            }
-        } catch {
-            print("❌ ChatController: Failed to encode list items: \(error)")
-        }
-    }
-    
-    private func showThinking() {
-        webView?.evaluateJavaScript("showThinking();")
-    }
-    
-    private func hideThinking() {
-        webView?.evaluateJavaScript("hideThinking();")
-    }
-    
-    private func updateStatus(_ status: String) {
-        let escapedStatus = status.replacingOccurrences(of: "\"", with: "\\\"")
-        webView?.evaluateJavaScript("updateStatus(\"\(escapedStatus)\");")
+        self.loadChatInterface()
     }
     
     func handleUserMessage(_ message: String) {
-        // No longer automatically add user message to UI
-        // Backend will send explicit command to show user text bubble
+        addMessage(message, isUser: true)
+        onUserMessage(message)
+    }
+    
+    func addMessage(_ text: String, isUser: Bool) {
+        guard let webView = webView else { return }
         
-        // Send to backend
-        onUserMessage?(message)
+        let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        
+        let script = "addMessage('\(escapedText)', \(isUser));"
+        
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
+    func clearChat() {
+        guard let webView = webView else { return }
+        
+        let script = "clearChat();"
+        
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
+    func displayList(_ items: [ListItem]) {
+        guard let webView = webView else { return }
+        
+        do {
+            // Convert ListItem objects to a format suitable for JavaScript
+            let itemsForJS = items.map { ["id": $0.id, "text": $0.text, "isSelected": $0.isSelected] }
+            let jsonData = try JSONSerialization.data(withJSONObject: itemsForJS)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
+            
+            let script = "displayList(\(jsonString));"
+            
+            webView.evaluateJavaScript(script) { result, error in
+                if let error = error {
+                    print("ChatController: JavaScript error: \(error)")
+                }
+            }
+        } catch {
+            print("ChatController: Failed to encode list items: \(error)")
+        }
+    }
+    
+    func updateStatus(_ status: String) {
+        guard let webView = webView else { return }
+        
+        let escapedStatus = status.replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "updateStatus('\(escapedStatus)');"
+        
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
+    func showThinking() {
+        guard let webView = webView else { return }
+        
+        let script = "showThinking();"
+        
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
+    func hideThinking() {
+        guard let webView = webView else { return }
+        
+        let script = "hideThinking();"
+        
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("ChatController: JavaScript error: \(error)")
+            }
+        }
+    }
+    
+    func handleDisplayCommand(_ command: DisplayCommand) {
+        switch command.type {
+        case .textBubble:
+            if let textCommand = command as? TextBubbleCommand {
+                addMessage(textCommand.text, isUser: textCommand.isUser)
+            }
+        case .clearScreen:
+            clearChat()
+        case .displayList:
+            if let listCommand = command as? DisplayListCommand {
+                displayList(listCommand.items)
+            }
+        case .updateStatus:
+            if let statusCommand = command as? UpdateStatusCommand {
+                updateStatus(statusCommand.status)
+            }
+        case .showThinking:
+            showThinking()
+        case .hideThinking:
+            hideThinking()
+        default:
+            break
+        }
+    }
+    
+    private func loadChatInterface() {
+        guard let webView = webView else { return }
+        
+        // Try to find the HTML file in the bundle
+        var htmlURL: URL?
+        
+        print("Searching for chat.html in Bundle.main...")
+        
+        if let bundleURL = Bundle.main.url(forResource: "chat", withExtension: "html") {
+            print("Found in Bundle.main: \(bundleURL)")
+            htmlURL = bundleURL
+        } else {
+            print("Not found in Bundle.main")
+            
+            // Try alternative path
+            let resourcePath = "Sources/SwiftCogGUI/Resources/chat.html"
+            print("Trying direct file path...")
+            
+            if FileManager.default.fileExists(atPath: resourcePath) {
+                htmlURL = URL(fileURLWithPath: resourcePath)
+                print("Found at direct path: \(resourcePath)")
+            } else {
+                print("Not found at direct path: \(resourcePath)")
+            }
+        }
+        
+        guard let htmlURL = htmlURL else {
+            print("Could not find chat.html file in bundle")
+            return
+        }
+        
+        do {
+            let htmlContent = try String(contentsOf: htmlURL)
+            webView.loadHTMLString(htmlContent, baseURL: htmlURL.deletingLastPathComponent())
+            print("Loaded chat interface from bundle")
+        } catch {
+            print("Error loading HTML file: \(error)")
+        }
     }
 }
 
@@ -176,7 +218,7 @@ struct ChatWebViewWrapper: NSViewRepresentable {
         webView.navigationDelegate = coordinator
         
         // Setup controller with webView
-        controller.setup(webView: webView)
+        controller.setWebView(webView)
         
         // Load the HTML content
         loadHTMLFromBundle(webView: webView)
@@ -189,37 +231,37 @@ struct ChatWebViewWrapper: NSViewRepresentable {
         var htmlURL: URL?
         
         // Try Bundle.main first (for built executable)
-        print("🔍 Searching for chat.html in Bundle.main...")
+        print("Searching for chat.html in Bundle.main...")
         htmlURL = Bundle.main.url(forResource: "chat", withExtension: "html")
         if htmlURL != nil {
-            print("✅ Found in Bundle.main: \(htmlURL!)")
+            print("Found in Bundle.main: \(htmlURL!)")
         } else {
-            print("❌ Not found in Bundle.main")
+            print("Not found in Bundle.main")
         }
         
         // Fallback: try direct file path for development
         if htmlURL == nil {
-            print("🔍 Trying direct file path...")
+            print("Trying direct file path...")
             let resourcePath = "Sources/SwiftCogGUI/Resources/chat.html"
             if FileManager.default.fileExists(atPath: resourcePath) {
                 htmlURL = URL(fileURLWithPath: resourcePath)
-                print("✅ Found at direct path: \(resourcePath)")
+                print("Found at direct path: \(resourcePath)")
             } else {
-                print("❌ Not found at direct path: \(resourcePath)")
+                print("Not found at direct path: \(resourcePath)")
             }
         }
         
         guard let finalURL = htmlURL else {
-            print("❌ Could not find chat.html file in bundle")
+            print("Could not find chat.html file in bundle")
             return
         }
         
         do {
             let htmlContent = try String(contentsOf: finalURL)
             webView.loadHTMLString(htmlContent, baseURL: finalURL.deletingLastPathComponent())
-            print("✅ Loaded chat interface from bundle")
+            print("Loaded chat interface from bundle")
         } catch {
-            print("❌ Error loading HTML file: \(error)")
+            print("Error loading HTML file: \(error)")
         }
     }
     

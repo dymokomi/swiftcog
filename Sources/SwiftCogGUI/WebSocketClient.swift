@@ -21,7 +21,7 @@ public class WebSocketClient {
         let url = URL(string: "ws://\(host):\(port)/ws")!
         webSocketTask = session.webSocketTask(with: url)
         
-        print("🌐 WebSocket Client: Connecting to \(url)")
+        print("WebSocket Client: Connecting to \(url)")
         webSocketTask?.resume()
         
         // Start receiving messages
@@ -47,7 +47,7 @@ public class WebSocketClient {
                 }
             }
         } catch {
-            print("❌ WebSocket Client: Receive error: \(error)")
+            print("WebSocket Client: Receive error: \(error)")
         }
     }
     
@@ -60,14 +60,14 @@ public class WebSocketClient {
             switch MessageType(rawValue: pythonMessage.type) {
             case .kernelMessage:
                 if let kernelMessage = pythonMessage.kernelMessage {
-                    print("🌐 WebSocket Client: Received kernel message: '\(kernelMessage.payload)'")
+                    print("WebSocket Client: Received kernel message: '\(kernelMessage.payload)'")
                     try await messageHandler?.handleMessage(kernelMessage)
                 }
             default:
-                print("❌ WebSocket Client: Unknown message type: \(pythonMessage.type)")
+                print("WebSocket Client: Unknown message type: \(pythonMessage.type)")
             }
         } catch {
-            print("❌ WebSocket Client: Failed to decode message: \(error)")
+            print("WebSocket Client: Failed to decode message: \(error)")
         }
     }
     
@@ -80,14 +80,14 @@ public class WebSocketClient {
         let data = try encoder.encode(message)
         let text = String(data: data, encoding: .utf8)!
         
-        print("🌐 WebSocket Client: Sending message: \(message.type)")
+        print("WebSocket Client: Sending message: \(message.type)")
         try await webSocketTask.send(.string(text))
-        print("✅ WebSocket Client: Message sent successfully")
+        print("WebSocket Client: Message sent successfully")
     }
     
     public func disconnect() async throws {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
-        print("🌐 WebSocket Client: Disconnected")
+        print("WebSocket Client: Disconnected")
     }
 } 

@@ -41,21 +41,21 @@ async def startup_event():
     """Initialize the server on startup."""
     global kernel_system
     
-    print("🚀 Starting SwiftCog Python Server...")
+    print("Starting SwiftCog Python Server...")
     
     # Check for required environment variables
     if not os.getenv("OPENAI_API_KEY"):
-        print("❌ Error: OPENAI_API_KEY environment variable not set")
+        print("Error: OPENAI_API_KEY environment variable not set")
         raise RuntimeError("OPENAI_API_KEY environment variable not set")
     
     # Connect to existing Ray cluster
     try:
         if not ray.is_initialized():
-            print("🔗 Connecting to Ray cluster...")
+            print("Connecting to Ray cluster...")
             ray.init(address="auto")  # Connect to existing cluster
-        print("⚡ Ray connected successfully!")
+        print("Ray connected successfully!")
     except Exception as e:
-        print(f"❌ Failed to connect to Ray cluster: {e}")
+        print(f"Failed to connect to Ray cluster: {e}")
         print("Make sure Ray cluster is running: ray start --head")
         raise
     
@@ -63,15 +63,15 @@ async def startup_event():
     kernel_system = KernelSystem(host="127.0.0.1", port=8765)
     await kernel_system.initialize()
     
-    print("🚀 Server initialized successfully!")
-    print("💡 Connect SwiftCog GUI to ws://127.0.0.1:8000/ws")
+    print("Server initialized successfully!")
+    print("Connect SwiftCog GUI to ws://127.0.0.1:8000/ws")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
     global kernel_system
     
-    print("🛑 Shutting down SwiftCog Server...")
+    print("Shutting down SwiftCog Server...")
     
     if kernel_system:
         await kernel_system.shutdown()
@@ -79,7 +79,7 @@ async def shutdown_event():
     if ray.is_initialized():
         ray.shutdown()
     
-    print("🛑 Server shutdown complete")
+    print("Server shutdown complete")
 
 @app.get("/")
 async def root():
@@ -106,7 +106,7 @@ async def websocket_endpoint(websocket: WebSocket):
     global kernel_system
     
     await websocket.accept()
-    print("🌐 GUI connected via WebSocket")
+    print("GUI connected via WebSocket")
     
     try:
         while True:
@@ -129,25 +129,32 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_text(error_response.model_dump_json())
                         continue
                     
-                    # Set up message forwarding to WebSocket
-                    async def forward_to_websocket(msg: KernelMessage):
-                        response = WebSocketMessage(
-                            type="kernelMessage",
-                            kernel_message=msg.to_dict()
+                    # Process message through kernel system
+                    if kernel_system and kernel_system.kernel_system_actor:
+                        await kernel_system.kernel_system_actor.handle_message.remote(kernel_message)
+                        
+                        # Check for outgoing messages and send them to GUI
+                        outgoing_messages = await kernel_system.kernel_system_actor.get_outgoing_messages.remote()
+                        for outgoing_message in outgoing_messages:
+                            response = WebSocketMessage(
+                                type="kernelMessage",
+                                kernel_message=outgoing_message.to_dict()
+                            )
+                            await websocket.send_text(response.model_dump_json())
+                    else:
+                        print("Error: Kernel system not initialized")
+                        error_response = WebSocketMessage(
+                            type="error",
+                            success=False,
+                            message="Kernel system not initialized"
                         )
-                        await websocket.send_text(response.model_dump_json())
-                    
-                    # Set the message handler
-                    kernel_system.set_message_handler(forward_to_websocket)
-                    
-                    # Send message to kernel system
-                    await kernel_system.process_message(kernel_message)
+                        await websocket.send_text(error_response.model_dump_json())
                 
                 else:
-                    print(f"⚠️ Unknown message type: {message.type}")
+                    print(f"Unknown message type: {message.type}")
                     
             except json.JSONDecodeError as e:
-                print(f"❌ Invalid JSON received: {e}")
+                print(f"Invalid JSON received: {e}")
                 error_response = WebSocketMessage(
                     type="error",
                     success=False,
@@ -156,7 +163,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(error_response.model_dump_json())
                 
             except Exception as e:
-                print(f"❌ Error processing message: {e}")
+                print(f"Error processing message: {e}")
                 error_response = WebSocketMessage(
                     type="error",
                     success=False,
@@ -165,11 +172,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(error_response.model_dump_json())
     
     except WebSocketDisconnect:
-        print("🌐 GUI disconnected")
+        print("GUI disconnected")
     except Exception as e:
-        print(f"❌ WebSocket error: {e}")
+        print(f"WebSocket error: {e}")
     finally:
-        print("🔌 WebSocket connection closed")
+        print("WebSocket connection closed")
 
 if __name__ == "__main__":
     import uvicorn

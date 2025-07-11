@@ -22,7 +22,7 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
             
             // Set up error handler
             system.setErrorHandler { errorMessage in
-                print("❌ Error: \(errorMessage)")
+                print("Error: \(errorMessage)")
             }
             
             // Create SpeechToTextEngine for speech input
@@ -82,14 +82,14 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
     
     private func startSpeechRecognition() async {
         guard let speechEngine = speechEngine else {
-            print("❌ Speech engine not initialized")
+            print("Speech engine not initialized")
             return
         }
         
         do {
-            print("🎙️ Starting speech recognition...")
+            print("Starting speech recognition...")
             for try await speechText in speechEngine.start() {
-                print("🎯 GUI: Speech input: '\(speechText)'")
+                print("GUI: Speech input: '\(speechText)'")
                 
                 // Handle speech input directly in GUI
                 await MainActor.run {
@@ -97,7 +97,7 @@ class SwiftCogGUIApp: NSObject, NSApplicationDelegate, @unchecked Sendable {
                 }
             }
         } catch {
-            print("❌ Speech recognition error: \(error)")
+            print("Speech recognition error: \(error)")
         }
     }
     

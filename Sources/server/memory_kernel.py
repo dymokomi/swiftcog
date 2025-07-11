@@ -25,6 +25,10 @@ class MemoryKernel:
             await self.default_handler(message)
     
     async def default_handler(self, message: KernelMessage) -> None:
-        """Default handler that processes memory-related information."""
-        print(f"Backend MemoryKernel: Processing memory for {message.payload}")
-        # Note: Default handlers don't emit - custom handlers handle system communication 
+        """Default handler that processes and stores memory-related information."""
+        print(f"MemoryKernel: Storing memory: {message.payload}")
+        
+        # Store the information in memory (for now just log it)
+        # In a real implementation, this would store to a database or memory system
+        # For now, we just acknowledge receipt and don't forward anywhere
+        print(f"Stored in memory: {message.payload}") 

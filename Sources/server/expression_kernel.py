@@ -25,6 +25,14 @@ class ExpressionKernel:
             await self.default_handler(message)
     
     async def default_handler(self, message: KernelMessage) -> None:
-        """Default handler that formats messages for expression."""
-        print(f"Backend ExpressionKernel: {message.payload}")
-        # Note: Default handlers don't emit - custom handlers handle system communication 
+        """Default handler that sends messages directly to GUI."""
+        print(f"ExpressionKernel: {message.payload}")
+        
+        # Hardcoded connection: Expression -> GUI (via system)
+        try:
+            kernel_system_actor = ray.get_actor("KernelSystemActor")
+            # Queue message for frontend delivery
+            await kernel_system_actor.queue_frontend_message.remote(message)
+            print("ExpressionKernel -> GUI")
+        except ValueError:
+            print("Error: KernelSystemActor not found") 

@@ -25,6 +25,13 @@ class LearningKernel:
             await self.default_handler(message)
     
     async def default_handler(self, message: KernelMessage) -> None:
-        """Default handler that processes learning and adaptation."""
-        print(f"Backend LearningKernel: Learning from {message.payload}")
-        # Note: Default handlers don't emit - custom handlers handle system communication 
+        """Default handler that processes learning and forwards directly to Memory."""
+        print(f"LearningKernel: Learning from {message.payload}")
+        
+        # Hardcoded connection: Learning -> Memory
+        try:
+            memory_kernel = ray.get_actor("MemoryKernel")
+            await memory_kernel.receive.remote(message)
+            print("LearningKernel -> MemoryKernel")
+        except ValueError:
+            print("Error: MemoryKernel not found") 

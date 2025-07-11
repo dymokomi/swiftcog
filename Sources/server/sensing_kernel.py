@@ -25,9 +25,13 @@ class SensingKernel:
             await self.default_handler(message)
     
     async def default_handler(self, message: KernelMessage) -> None:
-        """Default handler that processes the message."""
-        response = KernelMessage(
-            source_kernel_id=KernelID.SENSING,
-            payload=f"Cognitive processing complete for: '{message.payload}'"
-        )
-        # Note: Default handlers don't emit - custom handlers handle system communication 
+        """Default handler that processes the message and forwards directly to Executive."""
+        print(f"SensingKernel: Processing '{message.payload}'")
+        
+        # Hardcoded connection: Sensing -> Executive
+        try:
+            executive_kernel = ray.get_actor("ExecutiveKernel")
+            await executive_kernel.receive.remote(message)
+            print("SensingKernel -> ExecutiveKernel")
+        except ValueError:
+            print("Error: ExecutiveKernel not found") 

@@ -25,6 +25,13 @@ class MotorKernel:
             await self.default_handler(message)
     
     async def default_handler(self, message: KernelMessage) -> None:
-        """Default handler that processes motor commands."""
-        print(f"Backend MotorKernel: Processing {message.payload}")
-        # Note: Default handlers don't emit - custom handlers handle system communication 
+        """Default handler that processes motor commands and forwards directly to Expression."""
+        print(f"MotorKernel: Processing {message.payload}")
+        
+        # Hardcoded connection: Motor -> Expression
+        try:
+            expression_kernel = ray.get_actor("ExpressionKernel")
+            await expression_kernel.receive.remote(message)
+            print("MotorKernel -> ExpressionKernel")
+        except ValueError:
+            print("Error: ExpressionKernel not found") 

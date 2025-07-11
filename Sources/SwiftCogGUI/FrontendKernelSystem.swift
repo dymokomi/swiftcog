@@ -87,7 +87,7 @@ public class FrontendKernelSystem: AsyncMessageHandler {
     // MARK: - AsyncMessageHandler
     
     public func handleMessage(_ message: KernelMessage) async throws {
-        print("🔄 FrontendKernelSystem.handleMessage() - Message: \(message.sourceKernelId) -> '\(message.payload)'")
+        print("FrontendKernelSystem.handleMessage() - Message: \(message.sourceKernelId) -> '\(message.payload)'")
         
         // Try to parse as PythonAsyncMessage first (for Python server)
         if let data = message.payload.data(using: .utf8),
@@ -100,7 +100,7 @@ public class FrontendKernelSystem: AsyncMessageHandler {
                     displayCommandHandler?(displayCommand)
                 }
             } else {
-                print("❌ Failed to parse display command from: \(message.payload)")
+                print("Failed to parse display command from: \(message.payload)")
             }
         }
     }
@@ -117,12 +117,12 @@ public class FrontendKernelSystem: AsyncMessageHandler {
             }
         case .error:
             let errorText = message.errorMessage ?? message.message ?? "Unknown error"
-            print("❌ Error: \(errorText)")
+            print("Error: \(errorText)")
             await MainActor.run {
                 errorHandler?(errorText)
             }
         default:
-            print("❌ Unknown Python message type: \(message.type)")
+            print("Unknown Python message type: \(message.type)")
         }
     }
     
