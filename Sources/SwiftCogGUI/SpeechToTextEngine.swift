@@ -298,8 +298,6 @@ public class SpeechToTextEngine: NSObject, ObservableObject {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"
-        let timestamp = formatter.string(from: Date())
-        
         // Only update timer if transcription content actually changed
         if trimmedText != lastTranscriptionContent && !trimmedText.isEmpty {
             lastTranscriptionUpdateTime = Date()
