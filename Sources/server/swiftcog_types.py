@@ -168,6 +168,30 @@ class TextMessage(KernelMessage):
         return result
 
 
+@dataclass
+class PersonPresenceMessage(KernelMessage):
+    """Message containing person presence detection results."""
+    is_present: bool
+    person_id: Optional[str] = None
+    
+    def __init__(self, source_kernel_id: KernelID, is_present: bool, person_id: Optional[str] = None, message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.is_present = is_present
+        self.person_id = person_id
+    
+    def get_message_type(self) -> str:
+        return "personPresence"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "isPresent": self.is_present
+        })
+        if self.person_id is not None:
+            result["personId"] = self.person_id
+        return result
+
+
 def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
     """Factory method to create the appropriate KernelMessage subclass from dictionary."""
     source_kernel_id = KernelID(data["sourceKernelId"])
@@ -224,6 +248,13 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
         return UIMessage(
             source_kernel_id=source_kernel_id,
             content=data.get("content", ""),
+            message_id=message_id
+        )
+    elif message_type == "personPresence":
+        return PersonPresenceMessage(
+            source_kernel_id=source_kernel_id,
+            is_present=data.get("isPresent", False),
+            person_id=data.get("personId"),
             message_id=message_id
         )
     else:  # textData or unknown

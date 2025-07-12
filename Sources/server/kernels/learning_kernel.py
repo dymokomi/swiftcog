@@ -3,7 +3,7 @@ Learning kernel implementation for the SwiftCog Python server.
 """
 from typing import Callable, Optional
 import ray
-from swiftcog_types import KernelID, KernelMessage, TextMessage
+from swiftcog_types import KernelID, KernelMessage, TextMessage, PersonPresenceMessage
 from .base_kernel import BaseKernel
 
 
@@ -18,6 +18,8 @@ class LearningKernel(BaseKernel):
         """Default handler that processes learning and forwards directly to Memory."""
         if isinstance(message, TextMessage):
             content = message.content
+        elif isinstance(message, PersonPresenceMessage):
+            return
         else:
             print(f"LearningKernel: Unsupported message type: {type(message)}")
             return

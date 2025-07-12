@@ -8,6 +8,7 @@ DerivedData/
 .netrc
 .env
 memory_storage.json
+gaze_vectors.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
