@@ -1,8 +1,6 @@
 import Foundation
 import AVFoundation
 import Vision
-import CoreImage
-import AppKit
 
 public class GazeTracker: NSObject, ObservableObject {
     // Published state drives UI and VAD blocking
@@ -23,8 +21,6 @@ public class GazeTracker: NSObject, ObservableObject {
     
     private var isStarted = false
     private var currentFeatureVector: [Float]?
-    private var currentPixelBuffer: CVPixelBuffer?
-    private var snapshotCounter = 0
     
     // Camera warmup properties
     private var isWarmingUp = true
@@ -213,17 +209,9 @@ public class GazeTracker: NSObject, ObservableObject {
         ]
         
         // Add feature vector if available
-        let hasFeatureVector = currentFeatureVector != nil
         if let featureVector = currentFeatureVector {
             gazeData["featureVector"] = featureVector
             gazeData["featureVectorDimensions"] = featureVector.count
-        }
-        
-        // Save snapshot whenever we're sending gaze data with feature vectors
-        // This helps diagnose the double vector issue
-        if hasFeatureVector {
-            print("[\(timestamp)] GazeTracker: Saving snapshot for face vector analysis")
-            saveSnapshot(timestamp: timestamp, hasFeatureVector: hasFeatureVector)
         }
         
         // Convert to JSON string
@@ -271,9 +259,6 @@ extension GazeTracker: AVCaptureVideoDataOutputSampleBufferDelegate {
             // Continue processing during warmup to detect faces, but don't send gaze messages yet
         }
         
-        // Store current pixel buffer for potential snapshot
-        currentPixelBuffer = pixelBuffer
-        
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
         try? handler.perform([faceLandmarksRequest, featurePrintRequest])
     }
@@ -295,11 +280,6 @@ extension GazeTracker {
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
         let pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
         
-        // Debug: Log pixel format info only once during warmup
-        if isWarmingUp && validFrameCount == 0 {
-            print("GazeTracker: Frame info - Format: \(pixelFormat), Size: \(width)x\(height), BytesPerRow: \(bytesPerRow)")
-        }
-        
         // Sample just the center pixel for simplicity
         let centerX = width / 2
         let centerY = height / 2
@@ -314,21 +294,12 @@ extension GazeTracker {
             let green = Int(pixel[1])
             let red = Int(pixel[2])
             brightness = (red * 299 + green * 587 + blue * 114) / 1000
-            if !isWarmingUp {
-                print("GazeTracker: BGRA pixel at center - R:\(red) G:\(green) B:\(blue) Brightness:\(brightness)")
-            }
         } else if pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange || pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange {
             // YUV format - just use the Y (luminance) component
             let pixelOffset = centerY * bytesPerRow + centerX
             let pixel = baseAddress.advanced(by: pixelOffset).assumingMemoryBound(to: UInt8.self)
             brightness = Int(pixel[0])
-            if !isWarmingUp {
-                print("GazeTracker: YUV pixel at center - Y:\(brightness)")
-            }
         } else {
-            if isWarmingUp && validFrameCount == 0 {
-                print("GazeTracker: Unsupported pixel format: \(pixelFormat)")
-            }
             // For unknown formats, let's be conservative and allow processing
             return true
         }
@@ -336,54 +307,12 @@ extension GazeTracker {
         // Use a lower threshold since we're only checking one pixel
         let isValid = brightness > 5
         
-        if !isValid && !isWarmingUp {
+        if !isValid {
             print("GazeTracker: Skipping black/empty frame (brightness: \(brightness))")
-        } else if isValid && !isWarmingUp {
-            print("GazeTracker: Valid frame (brightness: \(brightness))")
         }
         
         return isValid
     }
 }
 
-// MARK: - Snapshot functionality
-extension GazeTracker {
-    private func saveSnapshot(timestamp: String, hasFeatureVector: Bool) {
-        guard let pixelBuffer = currentPixelBuffer else {
-            print("GazeTracker: No pixel buffer available for snapshot")
-            return
-        }
-        
-        // Create filename with timestamp and vector info
-        let vectorInfo = hasFeatureVector ? "with_vector" : "no_vector"
-        snapshotCounter += 1
-        let filename = "gaze_snapshot_\(timestamp.replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: ".", with: "_"))_\(vectorInfo)_\(snapshotCounter).jpg"
-        
-        // Get desktop directory for saving
-        let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let snapshotURL = desktopURL.appendingPathComponent(filename)
-        
-        // Convert pixel buffer to CGImage
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
-        
-        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
-            print("GazeTracker: Failed to create CGImage from pixel buffer")
-            return
-        }
-        
-        // Create NSBitmapImageRep and save as JPEG
-        let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
-        guard let jpegData = bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
-            print("GazeTracker: Failed to create JPEG data")
-            return
-        }
-        
-        do {
-            try jpegData.write(to: snapshotURL)
-            print("GazeTracker: Saved snapshot to \(snapshotURL.path)")
-        } catch {
-            print("GazeTracker: Failed to save snapshot: \(error)")
-        }
-    }
-} 
+ 
