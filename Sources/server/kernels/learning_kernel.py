@@ -62,21 +62,7 @@ class LearningKernel(BaseKernel):
         """Default handler that processes learning and forwards directly to Memory."""
         if isinstance(message, TextMessage):
             content = message.content
-            print(f"LearningKernel: Learning from {content}")
-            
-            # Hardcoded connection: Learning -> Memory
-            try:
-                # Create a new TextMessage with LearningKernel as the source
-                forwarded_message = TextMessage(
-                    source_kernel_id=KernelID.LEARNING,
-                    content=content
-                )
-                
-                memory_kernel = ray.get_actor("MemoryKernel")
-                await memory_kernel.receive.remote(forwarded_message)
-                print("LearningKernel -> MemoryKernel")
-            except ValueError:
-                print("Error: MemoryKernel not found")
+            print(f"LearningKernel: Ignoring TextMessage (no longer storing as facts): {content}")
                 
         elif isinstance(message, PersonPresenceMessage):
             print(f"LearningKernel: Processing person presence - present: {message.is_present}, person_id: {message.person_id}")

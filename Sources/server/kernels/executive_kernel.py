@@ -143,14 +143,6 @@ Respond naturally as if continuing the conversation."""
             await motor_kernel.receive.remote(ai_message)
             print("ExecutiveKernel -> MotorKernel (AI response)")
             
-            # Step 10: Send to Learning kernel for additional learning
-            learning_message = TextMessage(
-                source_kernel_id=KernelID.EXECUTIVE,
-                content=f"Learn from: {content} -> {ai_response}"
-            )
-            await learning_kernel.receive.remote(learning_message)
-            print("ExecutiveKernel -> LearningKernel (general learning)")
-            
         except ValueError as e:
             print(f"Error: Required kernel not found: {str(e)}")
             

@@ -24,7 +24,7 @@ except ImportError:
 class Concept:
     """A unified concept node that can represent any type of information."""
     id: str = field(default_factory=lambda: str(uuid4()))
-    ctype: str = "concept"  # person | object | goal | fact | note | context | percept
+    ctype: str = "concept"  # person | object | goal | context | percept | conversation
     label: str = ""  # short human-readable name
     data: dict = field(default_factory=dict)  # numeric/text payload
     activation: float = 0.0  # working-memory strength
@@ -216,39 +216,7 @@ class ConceptGraph:
             self.relate(goal.id, context_id, "inContext")
         return goal.id
     
-    def add_note(self, text: str) -> str:
-        """Add a free-form note concept."""
-        note = Concept(
-            ctype="note",
-            label=text[:40],
-            data={"text": text},
-            meta={"source": "input", "created": time(), "updated": time()}
-        )
-        self.add(note)
-        return note.id
-    
-    def add_fact(self, subj: str, pred: str, obj_or_val: Union[str, int, float, bool]) -> str:
-        """Add a fact concept."""
-        if isinstance(obj_or_val, str) and obj_or_val in self.G:
-            # Object-valued triple
-            fact = Concept(
-                ctype="fact",
-                label=f"{pred}",
-                data={"subject": subj, "predicate": pred, "object": obj_or_val},
-                meta={"source": "input", "created": time(), "updated": time()}
-            )
-        else:
-            # Literal-valued triple
-            fact = Concept(
-                ctype="fact",
-                label=f"{pred}",
-                data={"subject": subj, "predicate": pred, "value": obj_or_val},
-                meta={"source": "input", "created": time(), "updated": time()}
-            )
-        
-        self.add(fact)
-        self.relate(subj, fact.id, "asserts")
-        return fact.id
+
     
     # ----- Search and retrieval -----
     def search_by_label(self, query_text: str, k: int = 5, filter_fn: Optional[Callable] = None) -> List[tuple]:

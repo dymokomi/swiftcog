@@ -13,16 +13,16 @@ Memory organization using ConceptGraph:
 
 Working memory:
 - Concepts with high activation levels
-- Recent dialog history as note concepts
-- Current goals as goal concepts
+- Recent conversation messages as conversation concepts
 - Active context concepts
+- Current percepts as percept concepts
 
 Long term memory:
 - All concepts in the graph with low activation
-- Facts as fact concepts
 - People as person concepts
 - Objects as object concepts
-- Conversation summaries as note concepts
+- Historical conversation messages as conversation concepts
+- Session contexts as context concepts
 """
 
 @ray.remote
@@ -260,135 +260,6 @@ class MemoryKernel(BaseKernel):
         else:
             print(f"MemoryKernel: Unknown concept type: {concept_type}")
     
-    def _store_dialog_message(self, message: KernelMessage) -> str:
-        """Store a message as a note concept in the graph."""
-        # Create message content string
-        content = None
-        if isinstance(message, TextMessage):
-            content = message.content
-        elif isinstance(message, GazeMessage):
-            content = f"looking_at_screen: {message.looking_at_screen}"
-        else:
-            content = str(message)
-        
-        # Create a note concept for the dialog message
-        note_text = f"[{message.source_kernel_id.value}] {content}"
-        note_id = self.concept_graph.add_note(note_text)
-        
-        # Link to current session context
-        if self._current_session_id:
-            self.concept_graph.relate(note_id, self._current_session_id, "inContext")
-        
-        # Activate the concept
-        self.concept_graph.activate(note_id, strength=1.0)
-        
-        return note_id
-    
-    def _store_fact(self, fact: str, category: str = "general", source_kernel: str = "unknown") -> str:
-        """Store a fact as a fact concept."""
-        # Create a fact concept
-        fact_id = self.concept_graph.add_fact(
-            subj="system",  # Could be more specific
-            pred=category,
-            obj_or_val=fact
-        )
-        
-        # Link to current session context
-        if self._current_session_id:
-            self.concept_graph.relate(fact_id, self._current_session_id, "inContext")
-        
-        # Create a source annotation
-        source_note = f"Fact from {source_kernel}: {fact}"
-        source_id = self.concept_graph.add_note(source_note)
-        self.concept_graph.relate(fact_id, source_id, "source")
-        
-        return fact_id
-    
-    def set_current_speaker(self, speaker: str) -> str:
-        """Set the current speaker by creating/updating a person concept."""
-        # Try to find existing person concept
-        people = self.concept_graph.get_concepts_by_type("person")
-        person_id = None
-        
-        for person in people:
-            if person.data.get("name") == speaker:
-                person_id = person.id
-                break
-        
-        if not person_id:
-            # Create new person concept
-            person_id = self.concept_graph.add_person(speaker)
-        
-        # Activate the person concept
-        self.concept_graph.activate(person_id, strength=1.0)
-        
-        # Create a context note about current speaker
-        speaker_note = f"Current speaker: {speaker}"
-        note_id = self.concept_graph.add_note(speaker_note)
-        
-        if self._current_session_id:
-            self.concept_graph.relate(note_id, self._current_session_id, "inContext")
-        
-        print(f"MemoryKernel: Current speaker set to: {speaker} (ID: {person_id})")
-        return person_id
-    
-    def add_goal(self, goal: str, is_long_term: bool = False) -> str:
-        """Add a goal concept to memory."""
-        status = "active"
-        context_id = None if is_long_term else self._current_session_id
-        
-        goal_id = self.concept_graph.add_goal(
-            description=goal,
-            status=status,
-            context_id=context_id
-        )
-        
-        # Activate the goal
-        activation_strength = 0.5 if is_long_term else 1.0
-        self.concept_graph.activate(goal_id, strength=activation_strength)
-        
-        goal_type = "long-term" if is_long_term else "current"
-        print(f"MemoryKernel: Added {goal_type} goal: {goal} (ID: {goal_id})")
-        return goal_id
-    
-    def get_recent_context(self) -> Dict[str, Any]:
-        """Get recent context for other kernels."""
-        # Get active concepts
-        active_concepts = self.concept_graph.get_active_concepts(threshold=0.1)
-        
-        # Get recent messages (notes with high activation)
-        recent_messages = []
-        current_speaker = None
-        active_goals = []
-        
-        for concept in active_concepts:
-            if concept.ctype == "note":
-                # Extract message info
-                if "[" in concept.label and "]" in concept.label:
-                    recent_messages.append({
-                        "content": concept.data.get("text", ""),
-                        "timestamp": concept.meta.get("created", 0),
-                        "concept_id": concept.id
-                    })
-            elif concept.ctype == "person":
-                current_speaker = concept.data.get("name")
-            elif concept.ctype == "goal" and concept.data.get("status") == "active":
-                active_goals.append({
-                    "goal": concept.data.get("description", ""),
-                    "timestamp": concept.meta.get("created", 0),
-                    "concept_id": concept.id
-                })
-        
-        # Sort by timestamp and get most recent
-        recent_messages.sort(key=lambda x: x["timestamp"], reverse=True)
-        active_goals.sort(key=lambda x: x["timestamp"], reverse=True)
-        
-        return {
-            "current_speaker": current_speaker,
-            "recent_messages": recent_messages[:3],  # Last 3 messages
-            "active_goals": active_goals[:5]  # Top 5 goals
-        }
-    
     def search_memory(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Search memory using text matching."""
         results = self.concept_graph.search_by_label(query, k=limit)
@@ -407,27 +278,6 @@ class MemoryKernel(BaseKernel):
             formatted_results.append(result)
         
         return formatted_results
-    
-    def get_facts_about(self, subject: str) -> List[Dict[str, Any]]:
-        """Get facts related to a subject."""
-        facts = []
-        
-        # Search for facts mentioning the subject
-        results = self.concept_graph.search_by_label(subject, k=10, filter_fn=lambda c: c.ctype == "fact")
-        
-        for concept_id, score, concept in results:
-            fact_data = {
-                "id": concept_id,
-                "subject": concept.data.get("subject", ""),
-                "predicate": concept.data.get("predicate", ""),
-                "object": concept.data.get("object"),
-                "value": concept.data.get("value"),
-                "confidence": concept.meta.get("confidence", 1.0),
-                "created": concept.meta.get("created", 0)
-            }
-            facts.append(fact_data)
-        
-        return facts
     
     def decay_memory(self, decay_rate: float = 0.1) -> None:
         """Decay activation for all concepts."""
@@ -450,58 +300,8 @@ class MemoryKernel(BaseKernel):
                 print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
             return
         
-        # Store the message as a note concept
-        note_id = self._store_dialog_message(message)
-        
-        # Process different message types
-        if isinstance(message, TextMessage):
-            content = message.content
-            
-            # Store as fact based on source kernel
-            if message.source_kernel_id == KernelID.LEARNING:
-                print(f"MemoryKernel: Storing learning content: {content}")
-                fact_id = self._store_fact(content, "learning", "learning_kernel")
-                self.concept_graph.relate(note_id, fact_id, "generates")
-                
-            elif message.source_kernel_id == KernelID.SENSING:
-                print(f"MemoryKernel: Storing sensing content: {content}")
-                fact_id = self._store_fact(content, "sensing", "sensing_kernel")
-                self.concept_graph.relate(note_id, fact_id, "generates")
-                
-            elif message.source_kernel_id == KernelID.EXECUTIVE:
-                print(f"MemoryKernel: Storing executive content: {content}")
-                # Executive messages might contain goals or decisions
-                if "goal" in content.lower():
-                    goal_id = self.add_goal(content)
-                    self.concept_graph.relate(note_id, goal_id, "generates")
-                else:
-                    fact_id = self._store_fact(content, "executive", "executive_kernel")
-                    self.concept_graph.relate(note_id, fact_id, "generates")
-                    
-            elif message.source_kernel_id == KernelID.SENSING_INTERFACE:
-                print(f"MemoryKernel: Storing sensing interface content: {content}")
-                fact_id = self._store_fact(content, "sensing_interface", "sensing_interface")
-                self.concept_graph.relate(note_id, fact_id, "generates")
-                
-            else:
-                print(f"MemoryKernel: Storing content from {message.source_kernel_id.value}: {content}")
-                fact_id = self._store_fact(content, message.source_kernel_id.value, message.source_kernel_id.value)
-                self.concept_graph.relate(note_id, fact_id, "generates")
-            
-        elif isinstance(message, GazeMessage):
-            # Store gaze information as a fact
-            gaze_info = f"looking_at_screen: {message.looking_at_screen}"
-            print(f"MemoryKernel: Storing gaze info from {message.source_kernel_id.value}: {gaze_info}")
-            fact_id = self._store_fact(gaze_info, "gaze_tracking", message.source_kernel_id.value)
-            self.concept_graph.relate(note_id, fact_id, "generates")
-            
-        else:
-            print(f"MemoryKernel: Storing message type {type(message)} from {message.source_kernel_id.value}")
-            fact_id = self._store_fact(str(message), "misc", message.source_kernel_id.value)
-            self.concept_graph.relate(note_id, fact_id, "generates")
-        
-        # Print storage stats
-        print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
+        # For any other message types, just log and ignore
+        print(f"MemoryKernel: Ignoring unsupported message type: {type(message)} from {message.source_kernel_id.value}")
         
         # Periodically decay memory activation
         import random
