@@ -26,11 +26,5 @@ class ExpressionKernel(BaseKernel):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{timestamp}] ExpressionKernel: Processing and sending to GUI: {message.get_message_type()}")
         
-        # Send directly to GUI via KernelSystemActor (non-blocking, real-time)
-        try:
-            kernel_system_actor = ray.get_actor("KernelSystemActor")
-            await kernel_system_actor.send_to_gui.remote(message)
-            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"[{timestamp} -> {send_time}] ExpressionKernel: Sent to GUI immediately")
-        except ValueError:
-            print("ExpressionKernel: Error - KernelSystemActor not found") 
+        # Send directly to GUI (non-blocking, real-time)
+        await self.send_to_gui(message) 

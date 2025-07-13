@@ -88,13 +88,8 @@ class SensingKernel(BaseKernel):
                 person_id=person_id
             )
             
-            # Send person presence data to learning kernel via KernelSystemActor (non-blocking)
-            kernel_system_actor = ray.get_actor("KernelSystemActor")
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, presence_message)
-            
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"[{timestamp}] SensingKernel -> LearningKernel: Sent person presence - present: {is_present}, ID: {person_id} (non-blocking)")
+            # Send person presence data to learning kernel (non-blocking)
+            await self.send_to_kernel(KernelID.LEARNING, presence_message)
 
         except Exception as e:
             print(f"SensingKernel: Error processing gaze data: {e}")
@@ -102,23 +97,15 @@ class SensingKernel(BaseKernel):
     async def handle_text_data(self, message: KernelMessage) -> None:
         """Handle text data messages (non-blocking)."""
         try:
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            
             # Create a new TextMessage with SensingKernel as the source
             forwarded_message = TextMessage(
                 source_kernel_id=KernelID.SENSING,
                 content=message.content
             )
 
-            # Send to Learning and Executive kernels via KernelSystemActor (non-blocking)
-            kernel_system_actor = ray.get_actor("KernelSystemActor")
-            
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, forwarded_message)
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.EXECUTIVE, forwarded_message)
-            
-            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"[{timestamp} -> {send_time}] SensingKernel -> LearningKernel & ExecutiveKernel (non-blocking)")
+            # Send to Learning and Executive kernels (non-blocking)
+            await self.send_to_kernel(KernelID.LEARNING, forwarded_message)
+            await self.send_to_kernel(KernelID.EXECUTIVE, forwarded_message)
             
         except Exception as e:
             print(f"SensingKernel: Error processing text data: {e}") 

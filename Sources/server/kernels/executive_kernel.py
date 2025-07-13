@@ -46,7 +46,7 @@ class ExecutiveKernel(BaseKernel):
                 store_in_memory=True
             )
             
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, user_conversation_message)
+            await self.send_to_kernel(KernelID.LEARNING, user_conversation_message)
             print(f"[{start_time}] ExecutiveKernel -> LearningKernel (user conversation, non-blocking)")
             
             # Step 2: Send command to show user text bubble (non-blocking, immediate)
@@ -58,7 +58,7 @@ class ExecutiveKernel(BaseKernel):
                 content=user_bubble_json
             )
             
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, user_bubble_message)
+            await self.send_to_kernel(KernelID.MOTOR, user_bubble_message)
             bubble_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
             print(f"[{start_time} -> {bubble_time}] ExecutiveKernel -> MotorKernel (user bubble, non-blocking)")
             
@@ -71,7 +71,7 @@ class ExecutiveKernel(BaseKernel):
                 content=thinking_json
             )
             
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, thinking_message)
+            await self.send_to_kernel(KernelID.MOTOR, thinking_message)
             thinking_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
             print(f"[{start_time} -> {thinking_time}] ExecutiveKernel -> MotorKernel (thinking, non-blocking)")
             
@@ -122,7 +122,7 @@ Respond naturally as if continuing the conversation."""
                 store_in_memory=True
             )
             
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, ai_conversation_message)
+            await self.send_to_kernel(KernelID.LEARNING, ai_conversation_message)
             print(f"[{llm_end}] ExecutiveKernel -> LearningKernel (AI conversation, non-blocking)")
             
             # Step 8: Hide thinking indicator (non-blocking, immediate)
@@ -134,7 +134,7 @@ Respond naturally as if continuing the conversation."""
                 content=hide_thinking_json
             )
             
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, hide_thinking_message)
+            await self.send_to_kernel(KernelID.MOTOR, hide_thinking_message)
             hide_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
             print(f"[{llm_end} -> {hide_time}] ExecutiveKernel -> MotorKernel (hide thinking, non-blocking)")
             
@@ -147,7 +147,7 @@ Respond naturally as if continuing the conversation."""
                 content=ai_bubble_json
             )
             
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, ai_message)
+            await self.send_to_kernel(KernelID.MOTOR, ai_message)
             response_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
             print(f"[{llm_end} -> {response_time}] ExecutiveKernel -> MotorKernel (AI response, non-blocking)")
             
@@ -167,8 +167,7 @@ Respond naturally as if continuing the conversation."""
                     content=error_bubble_json
                 )
                 
-                kernel_system_actor = ray.get_actor("KernelSystemActor")
-                await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, error_message)
+                await self.send_to_kernel(KernelID.MOTOR, error_message)
                 print("ExecutiveKernel -> MotorKernel (error, non-blocking)")
             except Exception as inner_e:
                 print(f"ExecutiveKernel: Failed to send error message: {inner_e}") 

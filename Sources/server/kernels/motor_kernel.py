@@ -26,11 +26,5 @@ class MotorKernel(BaseKernel):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{timestamp}] MotorKernel: Processing {message.get_message_type()}")
         
-        # Send to Expression kernel via KernelSystemActor (non-blocking)
-        try:
-            kernel_system_actor = ray.get_actor("KernelSystemActor")
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.EXPRESSION, message)
-            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"[{timestamp} -> {send_time}] MotorKernel -> ExpressionKernel (non-blocking)")
-        except ValueError:
-            print("MotorKernel: Error - KernelSystemActor not found") 
+        # Send to Expression kernel (non-blocking)
+        await self.send_to_kernel(KernelID.EXPRESSION, message) 

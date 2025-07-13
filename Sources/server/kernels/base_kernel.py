@@ -2,6 +2,7 @@
 Base kernel class for the SwiftCog Python server.
 """
 import asyncio
+import ray
 from abc import ABC, abstractmethod
 from typing import Callable, Optional, List
 from swiftcog_types import KernelID, KernelMessage
@@ -20,6 +21,30 @@ class BaseKernel:
     def get_kernel_id(self) -> KernelID:
         """Return the kernel ID."""
         return self.kernel_id
+    
+    async def send_to_kernel(self, target_kernel_id: KernelID, message: KernelMessage) -> None:
+        """Send a message to another kernel via KernelSystemActor (non-blocking)."""
+        try:
+            kernel_system_actor = ray.get_actor("KernelSystemActor")
+            await kernel_system_actor.send_message_to_kernel.remote(target_kernel_id, message)
+            
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp}] {self.kernel_id.value} -> {target_kernel_id.value} ({message.get_message_type()}, non-blocking)")
+        except ValueError:
+            print(f"{self.kernel_id.value}: Error - KernelSystemActor not found")
+    
+    async def send_to_gui(self, message: KernelMessage) -> None:
+        """Send a message directly to the GUI via KernelSystemActor (non-blocking)."""
+        try:
+            kernel_system_actor = ray.get_actor("KernelSystemActor")
+            await kernel_system_actor.send_to_gui.remote(message)
+            
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp}] {self.kernel_id.value} -> GUI ({message.get_message_type()}, non-blocking)")
+        except ValueError:
+            print(f"{self.kernel_id.value}: Error - KernelSystemActor not found")
     
     async def start(self) -> None:
         """Start the kernel's background message processing."""

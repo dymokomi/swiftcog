@@ -38,16 +38,12 @@ class LearningKernel(BaseKernel):
             concept_data=concept_data
         )
         
-        # Send request to MemoryKernel via KernelSystemActor (non-blocking)
-        try:
-            kernel_system_actor = ray.get_actor("KernelSystemActor")
-            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MEMORY, request)
-            
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"[{timestamp}] LearningKernel -> MemoryKernel: Requested creation of person percept for {person_id} (non-blocking)")
-        except ValueError:
-            print("LearningKernel: Error - KernelSystemActor not found")
+        # Send request to MemoryKernel (non-blocking)
+        await self.send_to_kernel(KernelID.MEMORY, request)
+        
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[{timestamp}] LearningKernel -> MemoryKernel: Requested creation of person percept for {person_id} (non-blocking)")
     
     async def _update_person_percept_context(self, person_id: str) -> None:
         """Update an existing person percept to link to current context."""
@@ -90,15 +86,11 @@ class LearningKernel(BaseKernel):
         elif isinstance(message, ConversationMessage):
             print(f"[{timestamp}] LearningKernel: Processing conversation message from {message.speaker}: {message.content[:100]}...")
             
-            # Forward to MemoryKernel for storage via KernelSystemActor (non-blocking)
-            try:
-                kernel_system_actor = ray.get_actor("KernelSystemActor")
-                await kernel_system_actor.send_message_to_kernel.remote(KernelID.MEMORY, message)
-                
-                send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                print(f"[{timestamp} -> {send_time}] LearningKernel -> MemoryKernel (conversation, non-blocking)")
-            except ValueError:
-                print("LearningKernel: Error - KernelSystemActor not found")
+            # Forward to MemoryKernel for storage (non-blocking)
+            await self.send_to_kernel(KernelID.MEMORY, message)
+            
+            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp} -> {send_time}] LearningKernel -> MemoryKernel (conversation, non-blocking)")
                 
         else:
             print(f"[{timestamp}] LearningKernel: Unsupported message type: {type(message)}")
