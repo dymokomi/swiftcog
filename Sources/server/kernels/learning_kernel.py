@@ -6,6 +6,7 @@ import ray
 from swiftcog_types import KernelID, KernelMessage, TextMessage, PersonPresenceMessage, ConceptCreationRequest, ConversationMessage, GoalCreationRequest
 from .base_kernel import BaseKernel
 from llm_service import LLMService, OpenAIProvider, ToolDefinition
+from llm_template import llm_template
 
 
 @ray.remote
@@ -116,54 +117,24 @@ class LearningKernel(BaseKernel):
                 "recent_conversations": conversation_history
             }
             
-            # Create system prompt
-            system_prompt = """You are a learning system analyzing the current context to identify learning opportunities.
-Your task is to determine what single learning goal should be created based on the current situation.
-
-You should create ONE learning goal if you identify:
-- Unknown persons who need to be identified
-- Gaps in knowledge about people, objects, or situations
-- Patterns or behaviors that could be learned from
-- Relationships between entities that are unclear
-- Missing information that would be valuable to learn
-- AND there are no existing goals already addressing this learning need
-
-You should use the do_nothing tool if:
-- The current context is well-understood with sufficient information
-- There are already existing goals covering the learning opportunities
-- No significant knowledge gaps are present
-
-When creating goals, consider various types of learning opportunities:
-- Identity learning: "Learn the name and identity of person_123"
-- Behavioral learning: "Learn the communication patterns of person_456"
-- Relationship learning: "Learn how person_789 relates to other people in the context"
-- Preference learning: "Learn what topics person_123 is interested in"
-- Contextual learning: "Learn why person_456 visits at this time of day"
-
-Focus on the SINGLE most important learning opportunity in the current context. You can only make one tool call."""
+            # Use template system to generate prompts
+            template_result = llm_template.call(
+                "learning_opportunities",
+                person_id=person_id,
+                person_concepts_count=len(person_concepts),
+                person_percepts_count=len(person_percepts),
+                person_specific_goals_count=len(person_specific_goals),
+                all_goals_count=len(all_goals),
+                conversation_history_count=len(conversation_history),
+                person_concepts=person_concepts,
+                person_percepts=person_percepts,
+                person_specific_goals=person_specific_goals,
+                all_goals=all_goals,
+                conversation_history=conversation_history
+            )
             
-            # Create user message with context
-            user_message = f"""
-Current context: Person {person_id} has been added to the active context.
-
-Available information:
-- Person concepts found: {len(person_concepts)}
-- Person percepts found: {len(person_percepts)}
-- Person-specific learning goals: {len(person_specific_goals)}
-- All learning goals: {len(all_goals)}
-- Recent conversation messages: {len(conversation_history)}
-
-Detailed context:
-Person concepts: {person_concepts}
-Person percepts: {person_percepts}
-Person-specific goals: {person_specific_goals}
-All learning goals: {all_goals}
-Recent conversations: {conversation_history}
-
-Analyze this context and identify the most important learning opportunity. Consider what we don't know about this person, their relationships, behaviors, or preferences. 
-Create ONE learning goal for the most significant knowledge gap, but avoid duplicating existing goals.
-If no new learning goals are needed, use the do_nothing tool with a clear reason.
-"""
+            system_prompt = template_result['system_prompt']
+            user_message = template_result['user_message']
             
             # Call LLM with tools (limit to one tool call)
             response = await self.llm_service.process_message_with_tools(

@@ -6,6 +6,7 @@ import ray
 import datetime
 from swiftcog_types import KernelID, KernelMessage, TextMessage, TextBubbleCommand, ShowThinkingCommand, HideThinkingCommand, create_display_command_json, ConversationMessage
 from .base_kernel import BaseKernel
+from llm_template import llm_template
 
 
 @ray.remote
@@ -113,23 +114,22 @@ class ExecutiveKernel(BaseKernel):
     
     async def _process_with_llm(self, content: str, conversation_context: str, llm_service) -> str:
         """Use LLM to process with conversation context."""
-        system_prompt = f"""You are an executive decision-making system in a cognitive architecture. 
-Your role is to analyze input from sensing and memory, then provide intelligent decisions or responses.
-Be very concise and provide direct answers to questions.
-
-Previous conversation context:
-{conversation_context}
-
-Current user input: {content}
-
-Respond naturally as if continuing the conversation."""
+        # Use template system to generate prompts
+        template_result = llm_template.call(
+            "executive_decision",
+            conversation_context=conversation_context,
+            current_input=content
+        )
+        
+        system_prompt = template_result['system_prompt']
+        user_message = template_result['user_message']
         
         llm_start = self._get_current_time()
         print(f"[{llm_start}] ExecutiveKernel: Starting LLM processing")
         
         # Use the shared LLM service to process the message
         ai_response = await llm_service.process_message.remote(
-            content,
+            user_message,
             system_prompt=system_prompt,
             temperature=0.7,
             max_tokens=500
