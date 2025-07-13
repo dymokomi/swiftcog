@@ -215,6 +215,32 @@ class ConceptCreationRequest(KernelMessage):
         return result
 
 
+@dataclass
+class ConversationMessage(KernelMessage):
+    """Message containing conversation data to be stored in memory."""
+    speaker: str  # "user" or "ai"
+    content: str
+    store_in_memory: bool = True
+    
+    def __init__(self, source_kernel_id: KernelID, speaker: str, content: str, store_in_memory: bool = True, message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.speaker = speaker
+        self.content = content
+        self.store_in_memory = store_in_memory
+    
+    def get_message_type(self) -> str:
+        return "conversationMessage"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "speaker": self.speaker,
+            "content": self.content,
+            "storeInMemory": self.store_in_memory
+        })
+        return result
+
+
 def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
     """Factory method to create the appropriate KernelMessage subclass from dictionary."""
     source_kernel_id = KernelID(data["sourceKernelId"])
@@ -285,6 +311,14 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
             source_kernel_id=source_kernel_id,
             concept_type=data.get("conceptType", ""),
             concept_data=data.get("conceptData", {}),
+            message_id=message_id
+        )
+    elif message_type == "conversationMessage":
+        return ConversationMessage(
+            source_kernel_id=source_kernel_id,
+            speaker=data.get("speaker", "user"),
+            content=data.get("content", ""),
+            store_in_memory=data.get("storeInMemory", True),
             message_id=message_id
         )
     else:  # textData or unknown

@@ -4,7 +4,7 @@ Memory kernel implementation for the SwiftCog Python server.
 from typing import Callable, Optional, Dict, Any, List
 import ray
 from datetime import datetime
-from swiftcog_types import KernelID, KernelMessage, TextMessage, GazeMessage, ConceptCreationRequest
+from swiftcog_types import KernelID, KernelMessage, TextMessage, GazeMessage, ConceptCreationRequest, ConversationMessage
 from .base_kernel import BaseKernel
 from tools.concept_graph import ConceptGraph, Concept
 
@@ -158,6 +158,74 @@ class MemoryKernel(BaseKernel):
             "concepts_by_type": concepts_by_type,
             "active_concepts": active_count
         }
+    
+    def store_conversation_message(self, speaker: str, content: str) -> str:
+        """Store a conversation message in the concept graph (for other kernels)."""
+        # Create a conversation concept
+        conversation_concept = Concept(
+            ctype="conversation",
+            label=f"[{speaker}] {content[:50]}..." if len(content) > 50 else f"[{speaker}] {content}",
+            data={
+                "speaker": speaker,
+                "content": content,
+                "type": "conversation"
+            }
+        )
+        
+        self.concept_graph.add(conversation_concept)
+        
+        # Link to current session context
+        if self._current_session_id:
+            self.concept_graph.relate(conversation_concept.id, self._current_session_id, "inContext")
+        
+        # Activate the concept
+        self.concept_graph.activate(conversation_concept.id, strength=1.0)
+        
+        print(f"MemoryKernel: Stored conversation message from {speaker}: {content[:100]}...")
+        return conversation_concept.id
+    
+    def get_conversation_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get conversation history from the current session context (for other kernels)."""
+        if not self._current_session_id:
+            return []
+        
+        # Get all conversation concepts linked to current context
+        conversation_concepts = []
+        
+        # Find all concepts related to current session
+        for source, target, data in self.concept_graph.G.edges(data=True):
+            concept_node = None
+            
+            # Check if source is linked to current session
+            if target == self._current_session_id and data.get("relation") == "inContext":
+                concept_node = source
+            # Check if target is linked to current session  
+            elif source == self._current_session_id and data.get("relation") == "inContext":
+                concept_node = target
+            
+            if concept_node:
+                # Get the concept
+                concept_data = self.concept_graph.G.nodes[concept_node].get("obj")
+                if concept_data and concept_data.ctype == "conversation":
+                    conversation_concepts.append(concept_data)
+        
+        # Sort by creation time
+        conversation_concepts.sort(key=lambda c: c.meta.get("created", 0))
+        
+        # Take the most recent ones
+        recent_conversations = conversation_concepts[-limit:] if limit > 0 else conversation_concepts
+        
+        # Format for return
+        formatted_history = []
+        for concept in recent_conversations:
+            formatted_history.append({
+                "id": concept.id,
+                "speaker": concept.data.get("speaker", "unknown"),
+                "content": concept.data.get("content", ""),
+                "timestamp": concept.meta.get("created", 0)
+            })
+        
+        return formatted_history
     
     # ----- Internal methods -----
     
@@ -373,6 +441,13 @@ class MemoryKernel(BaseKernel):
         if isinstance(message, ConceptCreationRequest):
             self._handle_concept_creation_request(message)
             print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
+            return
+        
+        # Handle ConversationMessage messages
+        if isinstance(message, ConversationMessage):
+            if message.store_in_memory:
+                self.store_conversation_message(message.speaker, message.content)
+                print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
             return
         
         # Store the message as a note concept

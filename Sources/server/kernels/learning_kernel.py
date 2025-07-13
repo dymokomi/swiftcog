@@ -3,7 +3,7 @@ Learning kernel implementation for the SwiftCog Python server.
 """
 from typing import Callable, Optional
 import ray
-from swiftcog_types import KernelID, KernelMessage, TextMessage, PersonPresenceMessage, ConceptCreationRequest
+from swiftcog_types import KernelID, KernelMessage, TextMessage, PersonPresenceMessage, ConceptCreationRequest, ConversationMessage
 from .base_kernel import BaseKernel
 
 
@@ -92,6 +92,17 @@ class LearningKernel(BaseKernel):
                     await self._update_person_percept_context(message.person_id)
             else:
                 print("LearningKernel: Person not present or no person_id provided")
+                
+        elif isinstance(message, ConversationMessage):
+            print(f"LearningKernel: Processing conversation message from {message.speaker}: {message.content[:100]}...")
+            
+            # Forward to MemoryKernel for storage
+            try:
+                memory_kernel = ray.get_actor("MemoryKernel")
+                await memory_kernel.receive.remote(message)
+                print("LearningKernel -> MemoryKernel (conversation)")
+            except ValueError:
+                print("Error: MemoryKernel not found")
                 
         else:
             print(f"LearningKernel: Unsupported message type: {type(message)}")

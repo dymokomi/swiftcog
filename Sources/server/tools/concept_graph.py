@@ -135,7 +135,9 @@ class ConceptGraph:
         with self._lock:
             # Only create relationship if both nodes exist
             if src in self.G and dst in self.G:
-                self.G.add_edge(src, dst, key=rel, **(attrs or {}))
+                edge_attrs = attrs or {}
+                edge_attrs["relation"] = rel
+                self.G.add_edge(src, dst, **edge_attrs)
                 self._save_to_disk()
             else:
                 print(f"Warning: Cannot create relationship {rel} between {src} and {dst} - one or both nodes don't exist")
