@@ -149,17 +149,16 @@ class LearningKernel(BaseKernel):
             # Get recent conversation history for additional context
             conversation_history = await memory_kernel.get_conversation_history.remote(limit=5)
             
-            # Build comprehensive context for LLM
-            context_info = {
-                "person_id": person_id,
-                "person_concepts": person_concepts,
-                "person_percepts": person_percepts,
-                "person_specific_goals": person_specific_goals,
-                "all_learning_goals": all_goals,
-                "recent_conversations": conversation_history
-            }
+            # Format knowledge summary in natural language
+            person_knowledge_summary = self._format_knowledge_summary(person_knowledge)
             
-            # Use template system to generate prompts
+            # Format goals summary in natural language
+            person_goals_summary = self._format_goals_summary(person_specific_goals, all_goals)
+            
+            # Format conversation summary in natural language
+            conversation_summary = self._format_conversation_summary(conversation_history)
+            
+            # Use template system to generate prompts with natural language summaries
             template_result = llm_template.call(
                 "learning_opportunities",
                 person_id=person_id,
@@ -169,12 +168,9 @@ class LearningKernel(BaseKernel):
                 person_specific_goals_count=len(person_specific_goals),
                 all_goals_count=len(all_goals),
                 conversation_history_count=len(conversation_history),
-                person_concepts=person_concepts,
-                person_percepts=person_percepts,
-                person_knowledge=person_knowledge,
-                person_specific_goals=person_specific_goals,
-                all_goals=all_goals,
-                conversation_history=conversation_history
+                person_knowledge_summary=person_knowledge_summary,
+                person_goals_summary=person_goals_summary,
+                conversation_summary=conversation_summary
             )
             
             system_prompt = template_result['system_prompt']
@@ -209,6 +205,75 @@ class LearningKernel(BaseKernel):
             
         except Exception as e:
             print(f"LearningKernel: Error analyzing learning opportunities for person {person_id}: {e}")
+    
+    def _format_knowledge_summary(self, person_knowledge: list) -> str:
+        """Format person knowledge into natural language summary."""
+        if not person_knowledge:
+            return "No specific knowledge about this person yet."
+        
+        knowledge_items = []
+        for knowledge in person_knowledge:
+            knowledge_type = knowledge.get("type", "unknown")
+            description = knowledge.get("description", "")
+            
+            if knowledge_type == "personal_info":
+                knowledge_items.append(f"Personal: {description}")
+            elif knowledge_type == "preference":
+                knowledge_items.append(f"Preference: {description}")
+            elif knowledge_type == "fact":
+                knowledge_items.append(f"Fact: {description}")
+            else:
+                knowledge_items.append(f"{knowledge_type}: {description}")
+        
+        return "\n".join(knowledge_items)
+    
+    def _format_goals_summary(self, person_specific_goals: list, all_goals: list) -> str:
+        """Format learning goals into natural language summary."""
+        if not person_specific_goals and not all_goals:
+            return "No current learning goals."
+        
+        summary_parts = []
+        
+        if person_specific_goals:
+            person_goal_items = []
+            for goal in person_specific_goals:
+                description = goal.get("data", {}).get("description", "Unknown goal")
+                status = goal.get("data", {}).get("status", "unknown")
+                person_goal_items.append(f"- {description} ({status})")
+            
+            if person_goal_items:
+                summary_parts.append("Person-specific goals:\n" + "\n".join(person_goal_items))
+        
+        # Show most relevant general learning goals
+        if all_goals:
+            active_goals = [g for g in all_goals if g.get("data", {}).get("status") in ["open", "in_progress"]]
+            if active_goals:
+                general_goal_items = []
+                for goal in active_goals[:3]:  # Show top 3 active goals
+                    description = goal.get("data", {}).get("description", "Unknown goal")
+                    status = goal.get("data", {}).get("status", "unknown")
+                    general_goal_items.append(f"- {description} ({status})")
+                
+                if general_goal_items:
+                    summary_parts.append("Other active learning goals:\n" + "\n".join(general_goal_items))
+        
+        return "\n\n".join(summary_parts) if summary_parts else "No active learning goals."
+    
+    def _format_conversation_summary(self, conversation_history: list) -> str:
+        """Format conversation history into natural language summary."""
+        if not conversation_history:
+            return "No recent conversation history."
+        
+        conversation_items = []
+        for msg in conversation_history[-3:]:  # Show last 3 messages
+            speaker = msg.get("speaker", "unknown")
+            content = msg.get("content", "")
+            # Truncate long messages for summary
+            if len(content) > 100:
+                content = content[:97] + "..."
+            conversation_items.append(f"{speaker}: {content}")
+        
+        return "\n".join(conversation_items)
     
     async def _person_percept_exists(self, person_id: str) -> bool:
         """Check if a person percept already exists by querying MemoryKernel."""

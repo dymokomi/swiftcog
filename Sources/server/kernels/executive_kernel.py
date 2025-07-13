@@ -121,7 +121,81 @@ class ExecutiveKernel(BaseKernel):
             function=self._respond_only_tool
         )
         
-        self.available_tools = [complete_goal_tool, add_knowledge_tool, create_goal_tool, respond_only_tool]
+        # Memory query tools
+        get_memory_stats_tool = ToolDefinition(
+            name="get_memory_stats",
+            description="Get overview of memory state including concept counts, active concepts, and memory statistics",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief reason for checking memory stats"
+                    }
+                },
+                "required": ["reason"]
+            },
+            function=self._get_memory_stats_tool
+        )
+        
+        get_user_knowledge_tool = ToolDefinition(
+            name="get_user_knowledge",
+            description="Search for what the AI knows about the user, including personal information and preferences",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search query to filter user knowledge (empty for all)"
+                    }
+                },
+                "required": []
+            },
+            function=self._get_user_knowledge_tool
+        )
+        
+        get_active_goals_tool = ToolDefinition(
+            name="get_active_goals",
+            description="List current active learning goals and their status",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "include_completed": {
+                        "type": "boolean",
+                        "description": "Whether to include completed goals (default: false)"
+                    }
+                },
+                "required": []
+            },
+            function=self._get_active_goals_tool
+        )
+        
+        search_memory_tool = ToolDefinition(
+            name="search_memory",
+            description="Search memory for specific information using text matching",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query to find relevant memories"
+                    },
+                    "concept_type": {
+                        "type": "string",
+                        "description": "Optional concept type to filter by (knowledge, goal, conversation, percept, etc.)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 5)"
+                    }
+                },
+                "required": ["query"]
+            },
+            function=self._search_memory_tool
+        )
+        
+        self.available_tools = [complete_goal_tool, add_knowledge_tool, create_goal_tool, respond_only_tool, 
+                               get_memory_stats_tool, get_user_knowledge_tool, get_active_goals_tool, search_memory_tool]
     
     async def _complete_goal_tool(self, goal_id: str, completion_summary: str) -> str:
         """Tool function to mark a goal as completed."""
@@ -211,6 +285,176 @@ class ExecutiveKernel(BaseKernel):
         """Tool function for when no actions are needed, just responding."""
         print(f"ExecutiveKernel: Responding only - {reason}")
         return f"No actions taken: {reason}"
+    
+    async def _get_memory_stats_tool(self, reason: str) -> str:
+        """Tool function to get memory statistics and overview."""
+        try:
+            memory_kernel = ray.get_actor("MemoryKernel")
+            stats = await memory_kernel.get_concept_graph_stats.remote()
+            
+            # Format the stats nicely
+            total_concepts = stats.get("total_concepts", 0)
+            total_relations = stats.get("total_relations", 0)
+            active_concepts = stats.get("active_concepts", 0)
+            concepts_by_type = stats.get("concepts_by_type", {})
+            
+            result = f"Memory Statistics:\n"
+            result += f"- Total concepts: {total_concepts}\n"
+            result += f"- Active concepts: {active_concepts}\n"
+            result += f"- Total relations: {total_relations}\n"
+            result += f"- Concepts by type:\n"
+            
+            for ctype, count in concepts_by_type.items():
+                result += f"  • {ctype}: {count}\n"
+            
+            print(f"ExecutiveKernel: Retrieved memory stats - {total_concepts} concepts, {active_concepts} active")
+            return result
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error getting memory stats: {e}")
+            return f"Error retrieving memory stats: {str(e)}"
+    
+    async def _get_user_knowledge_tool(self, query: str = "") -> str:
+        """Tool function to search for what the AI knows about the user."""
+        try:
+            memory_kernel = ray.get_actor("MemoryKernel")
+            
+            # Get all knowledge concepts
+            all_knowledge = await memory_kernel.get_concepts_by_type.remote("knowledge")
+            
+            # Filter for personal information and preferences
+            user_knowledge = []
+            for knowledge in all_knowledge:
+                knowledge_data = knowledge.get("data", {})
+                knowledge_type = knowledge_data.get("knowledge_type", "")
+                description = knowledge_data.get("description", "")
+                
+                # Include personal info, preferences, and other user-related knowledge
+                if knowledge_type in ["personal_info", "preference", "fact"] or "user" in description.lower():
+                    if not query or query.lower() in description.lower():
+                        user_knowledge.append(knowledge)
+            
+            if not user_knowledge:
+                return "No personal knowledge found about the user yet."
+            
+            # Sort by creation time (newest first)
+            user_knowledge.sort(key=lambda k: k.get("meta", {}).get("created", 0), reverse=True)
+            
+            result = f"What I know about you:\n"
+            for knowledge in user_knowledge[:10]:  # Show top 10
+                knowledge_data = knowledge.get("data", {})
+                knowledge_type = knowledge_data.get("knowledge_type", "unknown")
+                description = knowledge_data.get("description", "")
+                activation = knowledge.get("activation", 0)
+                
+                status = " (active)" if activation > 0 else ""
+                result += f"- [{knowledge_type}] {description}{status}\n"
+            
+            if len(user_knowledge) > 10:
+                result += f"... and {len(user_knowledge) - 10} more items"
+            
+            print(f"ExecutiveKernel: Retrieved {len(user_knowledge)} user knowledge items")
+            return result
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error getting user knowledge: {e}")
+            return f"Error retrieving user knowledge: {str(e)}"
+    
+    async def _get_active_goals_tool(self, include_completed: bool = False) -> str:
+        """Tool function to get active learning goals."""
+        try:
+            memory_kernel = ray.get_actor("MemoryKernel")
+            all_goals = await memory_kernel.get_concepts_by_type.remote("goal")
+            
+            if not all_goals:
+                return "No learning goals found."
+            
+            # Filter goals based on status
+            filtered_goals = []
+            for goal in all_goals:
+                goal_data = goal.get("data", {})
+                status = goal_data.get("status", "unknown")
+                
+                if include_completed:
+                    filtered_goals.append(goal)
+                elif status != "completed":
+                    filtered_goals.append(goal)
+            
+            if not filtered_goals:
+                return "No active learning goals found."
+            
+            # Sort by activation (most active first), then by creation time
+            filtered_goals.sort(key=lambda g: (g.get("activation", 0), g.get("meta", {}).get("created", 0)), reverse=True)
+            
+            result = f"Learning Goals:\n"
+            for goal in filtered_goals:
+                goal_data = goal.get("data", {})
+                description = goal_data.get("description", "No description")
+                status = goal_data.get("status", "unknown")
+                activation = goal.get("activation", 0)
+                
+                status_icon = {
+                    "open": "○",
+                    "in_progress": "●",
+                    "completed": "✓"
+                }.get(status, "?")
+                
+                activation_info = f" (activation: {activation:.2f})" if activation > 0 else ""
+                result += f"{status_icon} {description} [{status}]{activation_info}\n"
+            
+            print(f"ExecutiveKernel: Retrieved {len(filtered_goals)} goals")
+            return result
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error getting active goals: {e}")
+            return f"Error retrieving active goals: {str(e)}"
+    
+    async def _search_memory_tool(self, query: str, concept_type: str = None, limit: int = 5) -> str:
+        """Tool function to search memory for specific information."""
+        try:
+            memory_kernel = ray.get_actor("MemoryKernel")
+            
+            # Use the memory kernel's search functionality
+            if concept_type:
+                results = await memory_kernel.search_concepts.remote(query, limit, concept_type)
+            else:
+                results = await memory_kernel.search_concepts.remote(query, limit)
+            
+            if not results:
+                return f"No memories found matching '{query}'"
+            
+            result = f"Search results for '{query}':\n"
+            for i, item in enumerate(results, 1):
+                concept_type = item.get("type", "unknown")
+                label = item.get("label", "No label")
+                score = item.get("score", 0)
+                activation = item.get("activation", 0)
+                
+                # Show additional details for different concept types
+                data = item.get("data", {})
+                details = ""
+                if concept_type == "knowledge":
+                    knowledge_type = data.get("knowledge_type", "")
+                    if knowledge_type:
+                        details = f" ({knowledge_type})"
+                elif concept_type == "goal":
+                    status = data.get("status", "")
+                    if status:
+                        details = f" ({status})"
+                elif concept_type == "conversation":
+                    speaker = data.get("speaker", "")
+                    if speaker:
+                        details = f" by {speaker}"
+                
+                activation_info = f" [active: {activation:.2f}]" if activation > 0 else ""
+                result += f"{i}. [{concept_type}] {label}{details}{activation_info}\n"
+            
+            print(f"ExecutiveKernel: Found {len(results)} memory results for '{query}'")
+            return result
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error searching memory: {e}")
+            return f"Error searching memory: {str(e)}"
         
     async def start_proactive_monitoring(self) -> None:
         """Start the proactive goal checking background task."""
@@ -695,16 +939,21 @@ class ExecutiveKernel(BaseKernel):
             if not active_goals:
                 return "No active learning goals."
             
-            # Format goals for context
+            # Format goals for context in natural language
             goals_list = []
-            for i, goal in enumerate(active_goals, 1):
+            for goal in active_goals:
                 goal_info = goal.get("data", {})
                 description = goal_info.get("description", "No description")
                 status = goal_info.get("status", "unknown")
-                activation = goal.get("activation", 0)
                 goal_id = goal.get("id", "unknown")
                 
-                goals_list.append(f"{i}. [{goal_id}] {description} (Status: {status}, Activation: {activation:.2f})")
+                # Format goal description naturally
+                if status == "open":
+                    goals_list.append(f"- {description} (ready to work on)")
+                elif status == "in_progress":
+                    goals_list.append(f"- {description} (currently working on this)")
+                else:
+                    goals_list.append(f"- {description} ({status})")
             
             return "Current learning goals:\n" + "\n".join(goals_list)
             
@@ -726,19 +975,31 @@ class ExecutiveKernel(BaseKernel):
             context_parts = []
             
             if active_percepts:
-                percept_info = []
-                for percept in active_percepts:
-                    person_id = percept.get("data", {}).get("person_id", "unknown")
-                    percept_info.append(f"person_{person_id}")
-                context_parts.append(f"Currently perceiving: {', '.join(percept_info)}")
+                # Format person presence naturally
+                if len(active_percepts) == 1:
+                    person_id = active_percepts[0].get("data", {}).get("person_id", "unknown")
+                    context_parts.append(f"Currently interacting with person {person_id}")
+                else:
+                    person_ids = [p.get("data", {}).get("person_id", "unknown") for p in active_percepts]
+                    context_parts.append(f"Currently perceiving {len(active_percepts)} people: {', '.join(person_ids)}")
             
             if recent_knowledge:
-                knowledge_info = []
+                # Format knowledge naturally
+                knowledge_items = []
                 for knowledge in recent_knowledge:
                     knowledge_type = knowledge.get("data", {}).get("knowledge_type", "unknown")
-                    description = knowledge.get("data", {}).get("description", "")[:100]
-                    knowledge_info.append(f"- {knowledge_type}: {description}")
-                context_parts.append("Recent knowledge:\n" + "\n".join(knowledge_info))
+                    description = knowledge.get("data", {}).get("description", "")
+                    
+                    if knowledge_type == "personal_info":
+                        knowledge_items.append(f"Personal: {description}")
+                    elif knowledge_type == "preference":
+                        knowledge_items.append(f"Preference: {description}")
+                    elif knowledge_type == "fact":
+                        knowledge_items.append(f"Fact: {description}")
+                    else:
+                        knowledge_items.append(f"{knowledge_type}: {description}")
+                
+                context_parts.append("What I know:\n" + "\n".join(knowledge_items))
             
             return "\n\n".join(context_parts) if context_parts else "No person context available."
             

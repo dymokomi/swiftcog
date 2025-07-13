@@ -63,10 +63,23 @@ class LLMTemplate:
             var_name = match.group(1)
             if var_name in variables:
                 value = variables[var_name]
-                # Convert to string, handling lists and dicts nicely
-                if isinstance(value, (list, dict)):
-                    return json.dumps(value, indent=2)
-                return str(value)
+                # Convert to string appropriately
+                if isinstance(value, str):
+                    return value
+                elif isinstance(value, (int, float)):
+                    return str(value)
+                elif isinstance(value, bool):
+                    return str(value).lower()
+                elif isinstance(value, list):
+                    # For lists, join with newlines for better readability
+                    return '\n'.join(str(item) for item in value)
+                elif isinstance(value, dict):
+                    # For dicts, format as key: value pairs
+                    return '\n'.join(f"{k}: {v}" for k, v in value.items())
+                elif value is None:
+                    return "None"
+                else:
+                    return str(value)
             else:
                 # Keep the original placeholder if variable not found
                 return match.group(0)

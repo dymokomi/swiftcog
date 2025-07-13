@@ -2,50 +2,57 @@ system_prompt: |
   You are a learning system analyzing the current context to identify learning opportunities.
   Your task is to determine what single learning goal should be created based on the current situation.
 
+  You should use the do_nothing tool if:
+  - The person's basic identity is already known (name, basic info)
+  - There are already active goals covering the learning opportunities
+  - The current context is well-understood with sufficient information
+  - You have meaningful knowledge about this person already
+  - There are multiple completed goals showing sufficient learning has occurred
+
   You should create ONE learning goal if you identify:
-  - Unknown persons who need to be identified
-  - Gaps in knowledge about people, objects, or situations
-  - Patterns or behaviors that could be learned from
-  - Relationships between entities that are unclear
-  - Missing information that would be valuable to learn
+  - Unknown persons who need basic identification (name, identity)
+  - Significant gaps in understanding about people, objects, or situations
+  - Important patterns or behaviors that could be learned from
+  - Valuable relationships between entities that are unclear
+  - Critical missing information that would be valuable to learn
   - AND there are no existing goals already addressing this learning need
 
-  You should use the do_nothing tool if:
-  - The current context is well-understood with sufficient information
-  - There are already existing goals covering the learning opportunities
-  - No significant knowledge gaps are present
+  IMPORTANT: Be conservative about creating new goals. Only create them when there's a clear and significant knowledge gap that would meaningfully improve understanding. If you already know the person's name and have some basic information about them, prefer to do nothing rather than create redundant goals.
 
-  When creating goals, consider various types of learning opportunities:
-  - Identity learning: "Learn the name and identity of person_123"
-  - Behavioral learning: "Learn the communication patterns of person_456"
-  - Relationship learning: "Learn how person_789 relates to other people in the context"
-  - Preference learning: "Learn what topics person_123 is interested in"
-  - Contextual learning: "Learn why person_456 visits at this time of day"
+  When creating goals, focus on genuinely important learning opportunities:
+  - Identity learning: Only if you truly don't know who someone is
+  - Behavioral learning: Only for significant patterns worth understanding
+  - Relationship learning: Only for important connections
+  - Preference learning: Only for meaningful interests or preferences
+  - Contextual learning: Only for important contextual information
 
-  Focus on the SINGLE most important learning opportunity in the current context. You can only make one tool call.
+  Focus on the SINGLE most important learning opportunity if one exists. You can only make one tool call.
 
 user_message: |
   Current context: Person {{person_id}} has been added to the active context.
 
-  Available information:
-  - Person concepts found: {{person_concepts_count}}
-  - Person percepts found: {{person_percepts_count}}
-  - Knowledge about this person: {{person_knowledge_count}}
-  - Person-specific learning goals: {{person_specific_goals_count}}
-  - All learning goals: {{all_goals_count}}
-  - Recent conversation messages: {{conversation_history_count}}
+  Summary of available information:
+  - Person concepts: {{person_concepts_count}} found
+  - Person percepts: {{person_percepts_count}} found  
+  - Knowledge about this person: {{person_knowledge_count}} items
+  - Person-specific learning goals: {{person_specific_goals_count}} goals
+  - All learning goals: {{all_goals_count}} total goals
+  - Recent conversation messages: {{conversation_history_count}} messages
 
-  Detailed context:
-  Person concepts: {{person_concepts}}
-  Person percepts: {{person_percepts}}
-  Knowledge about this person: {{person_knowledge}}
-  Person-specific goals: {{person_specific_goals}}
-  All learning goals: {{all_goals}}
-  Recent conversations: {{conversation_history}}
+  Knowledge about this person:
+  {{person_knowledge_summary}}
 
-  Analyze this context and identify the most important learning opportunity. Consider what we don't know about this person, their relationships, behaviors, or preferences.
-  Create ONE learning goal for the most significant knowledge gap, but avoid duplicating existing goals.
-  If no new learning goals are needed, use the do_nothing tool with a clear reason.
+  Current learning goals:
+  {{person_goals_summary}}
+
+  Recent conversations:
+  {{conversation_summary}}
+
+  Based on this information, determine if there is a significant knowledge gap worth creating a learning goal for. 
+  
+  If you already know the person's name and have basic information about them, or if there are already active goals covering what you might want to learn, use do_nothing.
+  
+  Only create a goal if there's a clear, important knowledge gap that would meaningfully improve understanding.
 
 metadata:
   description: Template for analyzing learning opportunities when a person is added to context
@@ -59,9 +66,6 @@ metadata:
     - person_specific_goals_count
     - all_goals_count
     - conversation_history_count
-    - person_concepts
-    - person_percepts
-    - person_knowledge
-    - person_specific_goals
-    - all_goals
-    - conversation_history 
+    - person_knowledge_summary
+    - person_goals_summary
+    - conversation_summary 
