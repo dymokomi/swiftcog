@@ -9,7 +9,7 @@ from .base_kernel import BaseKernel
 
 @ray.remote
 class LearningKernel(BaseKernel):
-    """Learning kernel implementation matching the Swift version."""
+    """Learning kernel implementation with non-blocking message routing."""
     
     def __init__(self, custom_handler: Optional[Callable] = None):
         super().__init__(KernelID.LEARNING, custom_handler)
@@ -21,11 +21,11 @@ class LearningKernel(BaseKernel):
             exists = await memory_kernel.check_percept_exists.remote(person_id)
             return exists
         except ValueError:
-            print("Error: MemoryKernel not found")
+            print("LearningKernel: Error - MemoryKernel not found")
             return False
     
     async def _request_person_percept_creation(self, person_id: str) -> None:
-        """Request creation of a new person percept concept."""
+        """Request creation of a new person percept concept (non-blocking)."""
         concept_data = {
             "person_id": person_id,
             "percept_type": "person_presence",
@@ -38,13 +38,16 @@ class LearningKernel(BaseKernel):
             concept_data=concept_data
         )
         
-        # Send request to MemoryKernel
+        # Send request to MemoryKernel via KernelSystemActor (non-blocking)
         try:
-            memory_kernel = ray.get_actor("MemoryKernel")
-            await memory_kernel.receive.remote(request)
-            print(f"LearningKernel: Requested creation of person percept for {person_id}")
+            kernel_system_actor = ray.get_actor("KernelSystemActor")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MEMORY, request)
+            
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp}] LearningKernel -> MemoryKernel: Requested creation of person percept for {person_id} (non-blocking)")
         except ValueError:
-            print("Error: MemoryKernel not found")
+            print("LearningKernel: Error - KernelSystemActor not found")
     
     async def _update_person_percept_context(self, person_id: str) -> None:
         """Update an existing person percept to link to current context."""
@@ -52,20 +55,25 @@ class LearningKernel(BaseKernel):
             memory_kernel = ray.get_actor("MemoryKernel")
             updated = await memory_kernel.update_person_percept_context.remote(person_id)
             if updated:
-                print(f"LearningKernel: Updated context for existing person percept {person_id}")
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                print(f"[{timestamp}] LearningKernel: Updated context for existing person percept {person_id}")
             else:
                 print(f"LearningKernel: Failed to update context for person percept {person_id}")
         except ValueError:
-            print("Error: MemoryKernel not found")
+            print("LearningKernel: Error - MemoryKernel not found")
     
     async def receive(self, message: KernelMessage) -> None:
-        """Default handler that processes learning and forwards directly to Memory."""
+        """Process learning messages and forward to Memory (non-blocking)."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        
         if isinstance(message, TextMessage):
             content = message.content
-            print(f"LearningKernel: Ignoring TextMessage (no longer storing as facts): {content}")
+            print(f"[{timestamp}] LearningKernel: Ignoring TextMessage (no longer storing as facts): {content}")
                 
         elif isinstance(message, PersonPresenceMessage):
-            print(f"LearningKernel: Processing person presence - present: {message.is_present}, person_id: {message.person_id}")
+            print(f"[{timestamp}] LearningKernel: Processing person presence - present: {message.is_present}, person_id: {message.person_id}")
             
             # Only process if person is present and we have a person_id
             if message.is_present and message.person_id:
@@ -80,16 +88,18 @@ class LearningKernel(BaseKernel):
                 print("LearningKernel: Person not present or no person_id provided")
                 
         elif isinstance(message, ConversationMessage):
-            print(f"LearningKernel: Processing conversation message from {message.speaker}: {message.content[:100]}...")
+            print(f"[{timestamp}] LearningKernel: Processing conversation message from {message.speaker}: {message.content[:100]}...")
             
-            # Forward to MemoryKernel for storage
+            # Forward to MemoryKernel for storage via KernelSystemActor (non-blocking)
             try:
-                memory_kernel = ray.get_actor("MemoryKernel")
-                await memory_kernel.receive.remote(message)
-                print("LearningKernel -> MemoryKernel (conversation)")
+                kernel_system_actor = ray.get_actor("KernelSystemActor")
+                await kernel_system_actor.send_message_to_kernel.remote(KernelID.MEMORY, message)
+                
+                send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                print(f"[{timestamp} -> {send_time}] LearningKernel -> MemoryKernel (conversation, non-blocking)")
             except ValueError:
-                print("Error: MemoryKernel not found")
+                print("LearningKernel: Error - KernelSystemActor not found")
                 
         else:
-            print(f"LearningKernel: Unsupported message type: {type(message)}")
+            print(f"[{timestamp}] LearningKernel: Unsupported message type: {type(message)}")
             return 

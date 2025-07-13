@@ -286,22 +286,26 @@ class MemoryKernel(BaseKernel):
     
     async def receive(self, message: KernelMessage) -> None:
         """Process and store memory-related information."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         
         # Handle ConceptCreationRequest messages
         if isinstance(message, ConceptCreationRequest):
+            print(f"[{timestamp}] MemoryKernel: Processing ConceptCreationRequest")
             self._handle_concept_creation_request(message)
             print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
             return
         
         # Handle ConversationMessage messages
         if isinstance(message, ConversationMessage):
+            print(f"[{timestamp}] MemoryKernel: Processing ConversationMessage from {message.speaker}")
             if message.store_in_memory:
                 self.store_conversation_message(message.speaker, message.content)
                 print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
             return
         
         # For any other message types, just log and ignore
-        print(f"MemoryKernel: Ignoring unsupported message type: {type(message)} from {message.source_kernel_id.value}")
+        print(f"[{timestamp}] MemoryKernel: Ignoring unsupported message type: {type(message)} from {message.source_kernel_id.value}")
         
         # Periodically decay memory activation
         import random

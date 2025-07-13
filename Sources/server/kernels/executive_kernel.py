@@ -9,13 +9,13 @@ from .base_kernel import BaseKernel
 
 @ray.remote
 class ExecutiveKernel(BaseKernel):
-    """Executive kernel implementation matching the Swift version."""
+    """Executive kernel implementation with non-blocking message routing."""
     
     def __init__(self, custom_handler: Optional[Callable] = None):
         super().__init__(KernelID.EXECUTIVE, custom_handler)
     
     async def receive(self, message: KernelMessage) -> None:
-        """Default handler that makes executive decisions using LLM with conversation context."""
+        """Process executive decisions using LLM (non-blocking, real-time)."""
         try:
             # Extract content from different message types
             if isinstance(message, TextMessage):
@@ -26,17 +26,19 @@ class ExecutiveKernel(BaseKernel):
                 print(f"ExecutiveKernel: Unsupported message type: {type(message)}")
                 return
             
+            import datetime
+            start_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{start_time}] ExecutiveKernel: Processing '{content}'")
+            
             # Get necessary actors
             kernel_system_actor = ray.get_actor("KernelSystemActor")
             llm_service = await kernel_system_actor.get_shared_llm_service.remote()
             if not llm_service:
                 raise RuntimeError("Shared LLM service not initialized")
             
-            motor_kernel = ray.get_actor("MotorKernel")
-            learning_kernel = ray.get_actor("LearningKernel")
             memory_kernel = ray.get_actor("MemoryKernel")
             
-            # Step 1: Store user input in conversation memory
+            # Step 1: Store user input in conversation memory (non-blocking)
             user_conversation_message = ConversationMessage(
                 source_kernel_id=KernelID.EXECUTIVE,
                 speaker="user",
@@ -44,10 +46,10 @@ class ExecutiveKernel(BaseKernel):
                 store_in_memory=True
             )
             
-            await learning_kernel.receive.remote(user_conversation_message)
-            print("ExecutiveKernel -> LearningKernel (user conversation)")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, user_conversation_message)
+            print(f"[{start_time}] ExecutiveKernel -> LearningKernel (user conversation, non-blocking)")
             
-            # Step 2: Send command to show user text bubble
+            # Step 2: Send command to show user text bubble (non-blocking, immediate)
             user_bubble_command = TextBubbleCommand(text=content, is_user=True)
             user_bubble_json = create_display_command_json(user_bubble_command)
             
@@ -56,10 +58,11 @@ class ExecutiveKernel(BaseKernel):
                 content=user_bubble_json
             )
             
-            await motor_kernel.receive.remote(user_bubble_message)
-            print("ExecutiveKernel -> MotorKernel (user bubble)")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, user_bubble_message)
+            bubble_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{start_time} -> {bubble_time}] ExecutiveKernel -> MotorKernel (user bubble, non-blocking)")
             
-            # Step 3: Show thinking indicator
+            # Step 3: Show thinking indicator (non-blocking, immediate)
             thinking_command = ShowThinkingCommand()
             thinking_json = create_display_command_json(thinking_command)
             
@@ -68,8 +71,9 @@ class ExecutiveKernel(BaseKernel):
                 content=thinking_json
             )
             
-            await motor_kernel.receive.remote(thinking_message)
-            print("ExecutiveKernel -> MotorKernel (thinking)")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, thinking_message)
+            thinking_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{start_time} -> {thinking_time}] ExecutiveKernel -> MotorKernel (thinking, non-blocking)")
             
             # Step 4: Get conversation history from memory
             conversation_history = await memory_kernel.get_conversation_history.remote(limit=10)
@@ -96,7 +100,8 @@ Current user input: {content}
 
 Respond naturally as if continuing the conversation."""
             
-            print(f"ExecutiveKernel: Processing with LLM (with context): {content}")
+            llm_start = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{llm_start}] ExecutiveKernel: Starting LLM processing")
             
             # Use the shared LLM service to process the message
             ai_response = await llm_service.process_message.remote(
@@ -106,9 +111,10 @@ Respond naturally as if continuing the conversation."""
                 max_tokens=500
             )
             
-            print(f"LLM: Generated response: {ai_response}")
+            llm_end = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{llm_start} -> {llm_end}] LLM: Generated response: {ai_response}")
             
-            # Step 7: Store AI response in conversation memory
+            # Step 7: Store AI response in conversation memory (non-blocking)
             ai_conversation_message = ConversationMessage(
                 source_kernel_id=KernelID.EXECUTIVE,
                 speaker="ai",
@@ -116,10 +122,10 @@ Respond naturally as if continuing the conversation."""
                 store_in_memory=True
             )
             
-            await learning_kernel.receive.remote(ai_conversation_message)
-            print("ExecutiveKernel -> LearningKernel (AI conversation)")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, ai_conversation_message)
+            print(f"[{llm_end}] ExecutiveKernel -> LearningKernel (AI conversation, non-blocking)")
             
-            # Step 8: Hide thinking indicator
+            # Step 8: Hide thinking indicator (non-blocking, immediate)
             hide_thinking_command = HideThinkingCommand()
             hide_thinking_json = create_display_command_json(hide_thinking_command)
             
@@ -128,10 +134,11 @@ Respond naturally as if continuing the conversation."""
                 content=hide_thinking_json
             )
             
-            await motor_kernel.receive.remote(hide_thinking_message)
-            print("ExecutiveKernel -> MotorKernel (hide thinking)")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, hide_thinking_message)
+            hide_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{llm_end} -> {hide_time}] ExecutiveKernel -> MotorKernel (hide thinking, non-blocking)")
             
-            # Step 9: Send command to show AI response bubble
+            # Step 9: Send command to show AI response bubble (non-blocking, immediate)
             ai_bubble_command = TextBubbleCommand(text=ai_response, is_user=False)
             ai_bubble_json = create_display_command_json(ai_bubble_command)
             
@@ -140,16 +147,17 @@ Respond naturally as if continuing the conversation."""
                 content=ai_bubble_json
             )
             
-            await motor_kernel.receive.remote(ai_message)
-            print("ExecutiveKernel -> MotorKernel (AI response)")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, ai_message)
+            response_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{llm_end} -> {response_time}] ExecutiveKernel -> MotorKernel (AI response, non-blocking)")
             
         except ValueError as e:
-            print(f"Error: Required kernel not found: {str(e)}")
+            print(f"ExecutiveKernel: Error - Required kernel not found: {str(e)}")
             
         except Exception as e:
-            print(f"Error in ExecutiveKernel: {str(e)}")
+            print(f"ExecutiveKernel: Error: {str(e)}")
             
-            # If anything fails, send error as text bubble
+            # If anything fails, send error as text bubble (non-blocking)
             try:
                 error_bubble_command = TextBubbleCommand(text=f"Error: {str(e)}", is_user=False)
                 error_bubble_json = create_display_command_json(error_bubble_command)
@@ -159,8 +167,8 @@ Respond naturally as if continuing the conversation."""
                     content=error_bubble_json
                 )
                 
-                motor_kernel = ray.get_actor("MotorKernel")
-                await motor_kernel.receive.remote(error_message)
-                print("ExecutiveKernel -> MotorKernel (error)")
+                kernel_system_actor = ray.get_actor("KernelSystemActor")
+                await kernel_system_actor.send_message_to_kernel.remote(KernelID.MOTOR, error_message)
+                print("ExecutiveKernel -> MotorKernel (error, non-blocking)")
             except Exception as inner_e:
-                print(f"Error: Failed to send error message: {inner_e}") 
+                print(f"ExecutiveKernel: Failed to send error message: {inner_e}") 

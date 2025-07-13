@@ -102,11 +102,41 @@ async def health_check():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for GUI communication."""
+    """WebSocket endpoint for GUI communication with real-time message polling."""
     global kernel_system
     
     await websocket.accept()
     print("GUI connected via WebSocket")
+    
+    # Flag to control message polling
+    processing_active = False
+    
+    async def poll_and_send_gui_messages():
+        """Continuously poll for GUI messages and send them immediately."""
+        while processing_active:
+            try:
+                if kernel_system and kernel_system.kernel_system_actor:
+                    # Check for GUI messages
+                    gui_messages = await kernel_system.kernel_system_actor.get_gui_messages.remote()
+                    
+                    if gui_messages:
+                        for gui_message in gui_messages:
+                            import datetime
+                            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                            
+                            response = WebSocketMessage(
+                                type="kernelMessage",
+                                kernel_message=gui_message.to_dict()
+                            )
+                            await websocket.send_text(response.model_dump_json())
+                            print(f"[{timestamp}] GUI: Sent {gui_message.get_message_type()} to WebSocket (real-time)")
+                
+                # Small delay to avoid overwhelming the system
+                await asyncio.sleep(0.005)  # 5ms polling interval for real-time response
+                
+            except Exception as e:
+                print(f"GUI: Error in message polling: {e}")
+                break
     
     try:
         while True:
@@ -129,18 +159,21 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_text(error_response.model_dump_json())
                         continue
                     
-                    # Process message through kernel system
+                    # Start real-time message processing
                     if kernel_system and kernel_system.kernel_system_actor:
+                        import datetime
+                        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        print(f"[{timestamp}] GUI: Starting real-time message processing")
+                        
+                        # Start polling for messages if not already active
+                        if not processing_active:
+                            processing_active = True
+                            polling_task = asyncio.create_task(poll_and_send_gui_messages())
+                        
+                        # Handle message asynchronously - results will be polled and sent in real-time
                         await kernel_system.kernel_system_actor.handle_message.remote(kernel_message)
                         
-                        # Check for outgoing messages and send them to GUI
-                        outgoing_messages = await kernel_system.kernel_system_actor.get_outgoing_messages.remote()
-                        for outgoing_message in outgoing_messages:
-                            response = WebSocketMessage(
-                                type="kernelMessage",
-                                kernel_message=outgoing_message.to_dict()
-                            )
-                            await websocket.send_text(response.model_dump_json())
+                        print(f"[{timestamp}] GUI: Message processing initiated (real-time polling active)")
                     else:
                         print("Error: Kernel system not initialized")
                         error_response = WebSocketMessage(
@@ -161,7 +194,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     message=f"Invalid JSON: {str(e)}"
                 )
                 await websocket.send_text(error_response.model_dump_json())
-                
+                 
             except Exception as e:
                 print(f"Error processing message: {e}")
                 error_response = WebSocketMessage(
@@ -170,12 +203,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     message=f"Error processing message: {str(e)}"
                 )
                 await websocket.send_text(error_response.model_dump_json())
-    
+     
     except WebSocketDisconnect:
         print("GUI disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
+        # Stop message polling
+        processing_active = False
         print("WebSocket connection closed")
 
 if __name__ == "__main__":

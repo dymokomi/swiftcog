@@ -9,25 +9,28 @@ from .base_kernel import BaseKernel
 
 @ray.remote
 class MotorKernel(BaseKernel):
-    """Motor kernel implementation matching the Swift version."""
+    """Motor kernel implementation with non-blocking message routing."""
     
     def __init__(self, custom_handler: Optional[Callable] = None):
         super().__init__(KernelID.MOTOR, custom_handler)
     
     async def receive(self, message: KernelMessage) -> None:
-        """Default handler that processes motor commands and forwards directly to Expression."""
+        """Process motor commands and forward to Expression (non-blocking)."""
         if isinstance(message, TextMessage):
             content = message.content
         else:
             print(f"MotorKernel: Unsupported message type: {type(message)}")
             return
             
-        print(f"MotorKernel: Processing {content}")
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[{timestamp}] MotorKernel: Processing {message.get_message_type()}")
         
-        # Hardcoded connection: Motor -> Expression
+        # Send to Expression kernel via KernelSystemActor (non-blocking)
         try:
-            expression_kernel = ray.get_actor("ExpressionKernel")
-            await expression_kernel.receive.remote(message)
-            print("MotorKernel -> ExpressionKernel")
+            kernel_system_actor = ray.get_actor("KernelSystemActor")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.EXPRESSION, message)
+            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp} -> {send_time}] MotorKernel -> ExpressionKernel (non-blocking)")
         except ValueError:
-            print("Error: ExpressionKernel not found") 
+            print("MotorKernel: Error - KernelSystemActor not found") 

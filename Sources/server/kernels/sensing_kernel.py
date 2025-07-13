@@ -10,7 +10,7 @@ from tools.vector_recognition import VectorRecognition
 
 @ray.remote
 class SensingKernel(BaseKernel):
-    """Sensing kernel implementation matching the Swift version."""
+    """Sensing kernel implementation with non-blocking message routing."""
     
     def __init__(self, custom_handler: Optional[Callable] = None):
         super().__init__(KernelID.SENSING, custom_handler)
@@ -24,8 +24,10 @@ class SensingKernel(BaseKernel):
         )
     
     async def receive(self, message: KernelMessage) -> None:
-        """Receive and process a message."""
-        print(f"SensingKernel: Received {message.get_message_type()} message from {message.source_kernel_id.value}")
+        """Receive and process a message (non-blocking)."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[{timestamp}] SensingKernel: Received {message.get_message_type()} message from {message.source_kernel_id.value}")
         
         # Handle different message types
         if isinstance(message, GazeMessage):
@@ -39,7 +41,7 @@ class SensingKernel(BaseKernel):
             return
 
     async def handle_gaze_data(self, message: GazeMessage) -> None:
-        """Handle gaze data messages and send person presence updates."""
+        """Handle gaze data messages and send person presence updates (non-blocking)."""
         try:
             person_id = None
             is_present = False
@@ -79,36 +81,44 @@ class SensingKernel(BaseKernel):
                 else:
                     print(f"SensingKernel: No person detected - no feature vector")
             
-            # Create and send PersonPresenceMessage
+            # Create and send PersonPresenceMessage (non-blocking)
             presence_message = PersonPresenceMessage(
                 source_kernel_id=KernelID.SENSING,
                 is_present=is_present,
                 person_id=person_id
             )
             
-            # Send person presence data to learning kernel
-            learning_kernel = ray.get_actor("LearningKernel")
-            await learning_kernel.receive.remote(presence_message)
+            # Send person presence data to learning kernel via KernelSystemActor (non-blocking)
+            kernel_system_actor = ray.get_actor("KernelSystemActor")
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, presence_message)
             
-            print(f"SensingKernel: Sent person presence - present: {is_present}, ID: {person_id}")
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp}] SensingKernel -> LearningKernel: Sent person presence - present: {is_present}, ID: {person_id} (non-blocking)")
 
         except Exception as e:
             print(f"SensingKernel: Error processing gaze data: {e}")
     
     async def handle_text_data(self, message: KernelMessage) -> None:
-        """Handle text data messages."""
+        """Handle text data messages (non-blocking)."""
         try:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            
             # Create a new TextMessage with SensingKernel as the source
             forwarded_message = TextMessage(
                 source_kernel_id=KernelID.SENSING,
                 content=message.content
             )
 
-            learning_kernel = ray.get_actor("LearningKernel")
-            executive_kernel = ray.get_actor("ExecutiveKernel")
-
-            await learning_kernel.receive.remote(forwarded_message)
-            await executive_kernel.receive.remote(forwarded_message)
+            # Send to Learning and Executive kernels via KernelSystemActor (non-blocking)
+            kernel_system_actor = ray.get_actor("KernelSystemActor")
+            
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.LEARNING, forwarded_message)
+            await kernel_system_actor.send_message_to_kernel.remote(KernelID.EXECUTIVE, forwarded_message)
+            
+            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp} -> {send_time}] SensingKernel -> LearningKernel & ExecutiveKernel (non-blocking)")
             
         except Exception as e:
             print(f"SensingKernel: Error processing text data: {e}") 

@@ -9,26 +9,28 @@ from .base_kernel import BaseKernel
 
 @ray.remote
 class ExpressionKernel(BaseKernel):
-    """Expression kernel implementation matching the Swift version."""
+    """Expression kernel implementation that sends directly to GUI (real-time)."""
     
     def __init__(self, custom_handler: Optional[Callable] = None):
         super().__init__(KernelID.EXPRESSION, custom_handler)
     
     async def receive(self, message: KernelMessage) -> None:
-        """Default handler that sends messages directly to GUI."""
+        """Process message and send directly to GUI immediately (non-blocking)."""
         if isinstance(message, TextMessage):
             content = message.content
         else:
             print(f"ExpressionKernel: Unsupported message type: {type(message)}")
             return
             
-        print(f"ExpressionKernel: {content}")
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[{timestamp}] ExpressionKernel: Processing and sending to GUI: {message.get_message_type()}")
         
-        # Hardcoded connection: Expression -> GUI (via system)
+        # Send directly to GUI via KernelSystemActor (non-blocking, real-time)
         try:
             kernel_system_actor = ray.get_actor("KernelSystemActor")
-            # Queue message for frontend delivery
-            await kernel_system_actor.queue_frontend_message.remote(message)
-            print("ExpressionKernel -> GUI")
+            await kernel_system_actor.send_to_gui.remote(message)
+            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp} -> {send_time}] ExpressionKernel: Sent to GUI immediately")
         except ValueError:
-            print("Error: KernelSystemActor not found") 
+            print("ExpressionKernel: Error - KernelSystemActor not found") 

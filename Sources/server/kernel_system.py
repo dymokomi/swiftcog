@@ -4,7 +4,7 @@ Kernel system implementation for the SwiftCog Python server.
 import asyncio
 import json
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable
 import websockets
 from websockets.server import WebSocketServerProtocol
 import ray
@@ -23,13 +23,39 @@ import os
 
 @ray.remote
 class KernelSystemActor:
-    """Ray actor for the kernel system - ensures single shared instance."""
+    """Ray actor for the kernel system - manages non-blocking message routing."""
     
     def __init__(self):
-        self.kernels: Dict[KernelID, Any] = {}
+        self.kernel_actors: Dict[KernelID, Any] = {}  # Ray remote references
         self.sensing_kernels: List[Any] = []
         self.shared_llm_service: Optional[Any] = None
-        self.outgoing_messages: List[KernelMessage] = []  # Queue for messages to send to frontend
+        self.gui_message_queue: List[KernelMessage] = []  # Queue for GUI messages
+    
+    async def send_to_gui(self, message: KernelMessage) -> None:
+        """Add a message to the GUI queue for immediate pickup."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        self.gui_message_queue.append(message)
+        print(f"[{timestamp}] KernelSystemActor: Added {message.get_message_type()} to GUI queue")
+    
+    def get_gui_messages(self) -> List[KernelMessage]:
+        """Get and clear GUI messages for immediate sending."""
+        messages = self.gui_message_queue.copy()
+        self.gui_message_queue.clear()
+        return messages
+    
+    async def send_message_to_kernel(self, target_kernel_id: KernelID, message: KernelMessage) -> None:
+        """Send a message to a kernel's queue (non-blocking)."""
+        try:
+            if target_kernel_id in self.kernel_actors:
+                kernel_actor = self.kernel_actors[target_kernel_id]
+                # Send message to kernel's queue (non-blocking)
+                await kernel_actor.send_message.remote(message)
+                print(f"KernelSystemActor: Routed {message.get_message_type()} to {target_kernel_id.value}")
+            else:
+                print(f"KernelSystemActor: Target kernel {target_kernel_id.value} not found")
+        except Exception as e:
+            print(f"KernelSystemActor: Error sending message to {target_kernel_id.value}: {e}")
     
     async def initialize_shared_llm_service(self, api_key: str) -> None:
         """Initialize the shared LLM service."""
@@ -45,44 +71,45 @@ class KernelSystemActor:
     async def create_sensing_kernel(self, custom_handler=None) -> Any:
         """Create a sensing kernel with optional custom handler."""
         kernel = SensingKernel.options(name="SensingKernel").remote(custom_handler)
-        self.kernels[KernelID.SENSING] = kernel
+        self.kernel_actors[KernelID.SENSING] = kernel
         self.sensing_kernels.append(kernel)
+        await kernel.start.remote()  # Start background processing
         return kernel
     
     async def create_executive_kernel(self, custom_handler=None) -> Any:
         """Create an executive kernel with optional custom handler."""
         kernel = ExecutiveKernel.options(name="ExecutiveKernel").remote(custom_handler)
-        self.kernels[KernelID.EXECUTIVE] = kernel
+        self.kernel_actors[KernelID.EXECUTIVE] = kernel
+        await kernel.start.remote()  # Start background processing
         return kernel
     
     async def create_motor_kernel(self, custom_handler=None) -> Any:
         """Create a motor kernel with optional custom handler."""
         kernel = MotorKernel.options(name="MotorKernel").remote(custom_handler)
-        self.kernels[KernelID.MOTOR] = kernel
+        self.kernel_actors[KernelID.MOTOR] = kernel
+        await kernel.start.remote()  # Start background processing
         return kernel
     
     async def create_expression_kernel(self, custom_handler=None) -> Any:
         """Create an expression kernel with optional custom handler."""
         kernel = ExpressionKernel.options(name="ExpressionKernel").remote(custom_handler)
-        self.kernels[KernelID.EXPRESSION] = kernel
+        self.kernel_actors[KernelID.EXPRESSION] = kernel
+        await kernel.start.remote()  # Start background processing
         return kernel
     
     async def create_memory_kernel(self, custom_handler=None) -> Any:
         """Create a memory kernel with optional custom handler."""
         kernel = MemoryKernel.options(name="MemoryKernel").remote(custom_handler)
-        self.kernels[KernelID.MEMORY] = kernel
+        self.kernel_actors[KernelID.MEMORY] = kernel
+        await kernel.start.remote()  # Start background processing
         return kernel
     
     async def create_learning_kernel(self, custom_handler=None) -> Any:
         """Create a learning kernel with optional custom handler."""
         kernel = LearningKernel.options(name="LearningKernel").remote(custom_handler)
-        self.kernels[KernelID.LEARNING] = kernel
+        self.kernel_actors[KernelID.LEARNING] = kernel
+        await kernel.start.remote()  # Start background processing
         return kernel
-    
-    async def queue_frontend_message(self, message: KernelMessage) -> None:
-        """Queue a message for delivery to the frontend."""
-        print("Backend queuing message for frontend")
-        self.outgoing_messages.append(message)
     
     def get_message_summary(self, message: KernelMessage) -> str:
         """Get a readable summary of the message content."""
@@ -96,34 +123,29 @@ class KernelSystemActor:
             return f"{message.get_message_type()}: {type(message).__name__}"
 
     async def handle_message(self, message: KernelMessage) -> None:
-        """Handle incoming message from frontend."""
+        """Handle incoming message from frontend (non-blocking)."""
         message_summary = self.get_message_summary(message)
         print(f"KernelSystemActor.handle_message() - Message: {message.source_kernel_id.value} -> {message_summary}")
         
-        # Route message to sensing kernel (hardcoded connection from GUI)
+        # Route message to sensing kernel (non-blocking)
         print("Backend routing message to SensingKernel")
         if self.sensing_kernels:
-            sensing_kernel = self.sensing_kernels[0]
-            await sensing_kernel.receive.remote(message)
+            await self.send_message_to_kernel(KernelID.SENSING, message)
         else:
             print("No sensing kernel available on backend!")
     
-    def get_outgoing_messages(self) -> List[KernelMessage]:
-        """Get and clear outgoing messages for the frontend."""
-        messages = self.outgoing_messages.copy()
-        self.outgoing_messages.clear()
-        return messages
-    
     async def create_default_kernels(self) -> None:
-        """Create the default kernel system with hardcoded connections."""
+        """Create the default kernel system with all kernels."""
         print("Creating default kernels...")
 
-        sensing_kernel = await self.create_sensing_kernel()
-        executive_kernel = await self.create_executive_kernel()
-        motor_kernel = await self.create_motor_kernel()
-        expression_kernel = await self.create_expression_kernel()
-        memory_kernel = await self.create_memory_kernel()
-        learning_kernel = await self.create_learning_kernel()
+        await self.create_sensing_kernel()
+        await self.create_executive_kernel()
+        await self.create_motor_kernel()
+        await self.create_expression_kernel()
+        await self.create_memory_kernel()
+        await self.create_learning_kernel()
+        
+        print("All kernels created and started")
 
 
 class KernelSystem:
