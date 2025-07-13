@@ -1,109 +1,165 @@
 #!/usr/bin/env python3
 """
-Utility script to inspect the memory storage file.
+Utility script to inspect the ConceptGraph storage file.
 """
 import json
 import sys
 from pathlib import Path
 from datetime import datetime
 
-def format_timestamp(timestamp_str):
+def format_timestamp(timestamp_float):
     """Format timestamp for better readability."""
     try:
-        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        dt = datetime.fromtimestamp(timestamp_float)
         return dt.strftime('%Y-%m-%d %H:%M:%S')
     except:
-        return timestamp_str
+        return str(timestamp_float)
 
-def print_memory_section(title, data, indent=0):
-    """Print a section of memory data with proper formatting."""
+def print_concept(concept_data, indent=0):
+    """Print a concept with proper formatting."""
     prefix = "  " * indent
-    print(f"{prefix}{title}:")
+    ctype = concept_data.get('ctype', 'unknown')
+    label = concept_data.get('label', 'No label')
+    data = concept_data.get('data', {})
+    meta = concept_data.get('meta', {})
+    activation = concept_data.get('activation', 0.0)
     
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if isinstance(value, list) and len(value) > 0:
-                print(f"{prefix}  {key} ({len(value)} items):")
-                for i, item in enumerate(value[-5:]):  # Show last 5 items
-                    if isinstance(item, dict):
-                        if 'timestamp' in item:
-                            timestamp = format_timestamp(item['timestamp'])
-                            content = item.get('content', item.get('goal', str(item)))
-                            print(f"{prefix}    {i+1}. [{timestamp}] {content}")
-                        else:
-                            print(f"{prefix}    {i+1}. {item}")
-                    else:
-                        print(f"{prefix}    {i+1}. {item}")
-                if len(value) > 5:
-                    print(f"{prefix}    ... and {len(value) - 5} more items")
-            elif isinstance(value, dict):
-                print_memory_section(key, value, indent + 1)
-            else:
-                print(f"{prefix}  {key}: {value}")
-    else:
-        print(f"{prefix}  {data}")
+    print(f"{prefix}[{ctype.upper()}] {label}")
+    
+    # Show creation time
+    if 'created' in meta:
+        created = format_timestamp(meta['created'])
+        print(f"{prefix}  Created: {created}")
+    
+    # Show activation if > 0
+    if activation > 0:
+        print(f"{prefix}  Activation: {activation:.3f}")
+    
+    # Show key data fields
+    if data:
+        important_fields = ['name', 'description', 'text', 'person_id', 'subject', 'predicate', 'value', 'object']
+        for field in important_fields:
+            if field in data:
+                value = data[field]
+                if isinstance(value, str) and len(value) > 50:
+                    value = value[:47] + "..."
+                print(f"{prefix}  {field}: {value}")
+    
+    print()
 
-def inspect_memory(storage_path="memory_storage.json"):
-    """Inspect the memory storage file."""
+def print_relations(edges_data, concepts_by_id, indent=0):
+    """Print relationships between concepts."""
+    prefix = "  " * indent
+    
+    # Group relations by type
+    relations_by_type = {}
+    for edge in edges_data:
+        rel_type = edge.get('relation', 'unknown')
+        if rel_type not in relations_by_type:
+            relations_by_type[rel_type] = []
+        relations_by_type[rel_type].append(edge)
+    
+    for rel_type, edges in relations_by_type.items():
+        print(f"{prefix}{rel_type.upper()} relations ({len(edges)}):")
+        for edge in edges[:5]:  # Show first 5
+            source = edge.get('source', 'unknown')
+            target = edge.get('target', 'unknown')
+            
+            source_label = concepts_by_id.get(source, {}).get('label', source[:8])
+            target_label = concepts_by_id.get(target, {}).get('label', target[:8])
+            
+            print(f"{prefix}  {source_label} -> {target_label}")
+        
+        if len(edges) > 5:
+            print(f"{prefix}  ... and {len(edges) - 5} more")
+        print()
+
+def inspect_concept_graph(storage_path="concept_graph.json"):
+    """Inspect the ConceptGraph storage file."""
     storage_file = Path(storage_path)
     
     if not storage_file.exists():
-        print(f"Memory storage file not found: {storage_path}")
+        print(f"ConceptGraph storage file not found: {storage_path}")
         print("The file will be created when the memory kernel first runs.")
         return
     
     try:
         with open(storage_file, 'r', encoding='utf-8') as f:
-            memory_data = json.load(f)
+            graph_data = json.load(f)
     except Exception as e:
-        print(f"Error reading memory storage file: {e}")
+        print(f"Error reading ConceptGraph storage file: {e}")
         return
     
-    print(f"Memory Storage Inspection - {storage_path}")
+    print(f"ConceptGraph Inspection - {storage_path}")
     print("=" * 50)
     
-    # Print metadata
-    if 'metadata' in memory_data:
-        metadata = memory_data['metadata']
-        print(f"Total messages processed: {metadata.get('total_messages_processed', 0)}")
-        print(f"Last active: {format_timestamp(metadata.get('last_active', 'Unknown'))}")
-        print(f"Kernel version: {metadata.get('kernel_version', 'Unknown')}")
+    nodes = graph_data.get('nodes', [])
+    edges = graph_data.get('edges', [])
+    
+    print(f"Total concepts: {len(nodes)}")
+    print(f"Total relations: {len(edges)}")
+    print()
+    
+    # Create concept lookup for relations
+    concepts_by_id = {node.get('id'): node for node in nodes}
+    
+    # Group concepts by type
+    concepts_by_type = {}
+    active_concepts = []
+    
+    for node in nodes:
+        ctype = node.get('ctype', 'unknown')
+        if ctype not in concepts_by_type:
+            concepts_by_type[ctype] = []
+        concepts_by_type[ctype].append(node)
+        
+        # Track active concepts
+        if node.get('activation', 0) > 0:
+            active_concepts.append(node)
+    
+    # Print concepts by type
+    for ctype in sorted(concepts_by_type.keys()):
+        concepts = concepts_by_type[ctype]
+        print(f"{ctype.upper()} concepts ({len(concepts)}):")
+        
+        # Sort by creation time (newest first)
+        concepts.sort(key=lambda c: c.get('meta', {}).get('created', 0), reverse=True)
+        
+        # Show first 3 concepts of each type
+        for concept in concepts[:3]:
+            print_concept(concept, indent=1)
+        
+        if len(concepts) > 3:
+            print(f"  ... and {len(concepts) - 3} more {ctype} concepts")
         print()
     
-    # Print working memory
-    if 'working_memory' in memory_data:
-        print_memory_section("Working Memory", memory_data['working_memory'])
+    # Print active concepts
+    if active_concepts:
+        print(f"ACTIVE concepts ({len(active_concepts)}):")
+        active_concepts.sort(key=lambda c: c.get('activation', 0), reverse=True)
+        for concept in active_concepts[:5]:
+            print_concept(concept, indent=1)
         print()
     
-    # Print long-term memory
-    if 'long_term_memory' in memory_data:
-        print_memory_section("Long-term Memory", memory_data['long_term_memory'])
-        print()
+    # Print relations
+    if edges:
+        print("RELATIONS:")
+        print_relations(edges, concepts_by_id, indent=1)
     
-    # Print summary
-    total_items = len(memory_data)
-    print(f"Total memory sections: {total_items}")
-    
-    if 'working_memory' in memory_data:
-        dialog_count = len(memory_data['working_memory'].get('dialog_history', []))
-        goals_count = len(memory_data['working_memory'].get('current_goals', []))
-        print(f"Working memory: {dialog_count} dialog entries, {goals_count} current goals")
-    
-    if 'long_term_memory' in memory_data:
-        ltm = memory_data['long_term_memory']
-        facts_count = sum(len(facts) for facts in ltm.get('facts', {}).values())
-        summaries_count = len(ltm.get('conversation_summaries', []))
-        lt_goals_count = len(ltm.get('long_term_goals', []))
-        print(f"Long-term memory: {facts_count} facts, {summaries_count} summaries, {lt_goals_count} long-term goals")
+    # Print summary statistics
+    print("SUMMARY:")
+    for ctype, concepts in concepts_by_type.items():
+        active_count = len([c for c in concepts if c.get('activation', 0) > 0])
+        print(f"  {ctype}: {len(concepts)} total ({active_count} active)")
 
 def main():
     """Main function."""
-    storage_path = "memory_storage.json"
+    storage_path = "concept_graph.json"
     
     if len(sys.argv) > 1:
         storage_path = sys.argv[1]
     
-    inspect_memory(storage_path)
+    inspect_concept_graph(storage_path)
 
 if __name__ == "__main__":
     main() 

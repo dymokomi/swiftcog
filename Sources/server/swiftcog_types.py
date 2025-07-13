@@ -192,6 +192,29 @@ class PersonPresenceMessage(KernelMessage):
         return result
 
 
+@dataclass
+class ConceptCreationRequest(KernelMessage):
+    """Message requesting creation of a new concept in memory."""
+    concept_type: str
+    concept_data: Dict[str, Any]
+    
+    def __init__(self, source_kernel_id: KernelID, concept_type: str, concept_data: Dict[str, Any], message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.concept_type = concept_type
+        self.concept_data = concept_data
+    
+    def get_message_type(self) -> str:
+        return "conceptCreationRequest"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "conceptType": self.concept_type,
+            "conceptData": self.concept_data
+        })
+        return result
+
+
 def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
     """Factory method to create the appropriate KernelMessage subclass from dictionary."""
     source_kernel_id = KernelID(data["sourceKernelId"])
@@ -255,6 +278,13 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
             source_kernel_id=source_kernel_id,
             is_present=data.get("isPresent", False),
             person_id=data.get("personId"),
+            message_id=message_id
+        )
+    elif message_type == "conceptCreationRequest":
+        return ConceptCreationRequest(
+            source_kernel_id=source_kernel_id,
+            concept_type=data.get("conceptType", ""),
+            concept_data=data.get("conceptData", {}),
             message_id=message_id
         )
     else:  # textData or unknown
