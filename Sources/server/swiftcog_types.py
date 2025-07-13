@@ -217,6 +217,33 @@ class ConversationMessage(KernelMessage):
         return result
 
 
+@dataclass
+class GoalCreationRequest(KernelMessage):
+    """Message requesting creation of a new goal in memory."""
+    description: str
+    context_id: Optional[str] = None
+    status: str = "open"
+    
+    def __init__(self, source_kernel_id: KernelID, description: str, context_id: Optional[str] = None, status: str = "open", message_id: Optional[str] = None):
+        super().__init__(source_kernel_id, message_id)
+        self.description = description
+        self.context_id = context_id
+        self.status = status
+    
+    def get_message_type(self) -> str:
+        return "goalCreationRequest"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = self.get_base_dict()
+        result.update({
+            "description": self.description,
+            "status": self.status
+        })
+        if self.context_id is not None:
+            result["contextId"] = self.context_id
+        return result
+
+
 def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
     """Factory method to create the appropriate KernelMessage subclass from dictionary."""
     source_kernel_id = KernelID(data["sourceKernelId"])
@@ -288,6 +315,14 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
             speaker=data.get("speaker", "user"),
             content=data.get("content", ""),
             store_in_memory=data.get("storeInMemory", True),
+            message_id=message_id
+        )
+    elif message_type == "goalCreationRequest":
+        return GoalCreationRequest(
+            source_kernel_id=source_kernel_id,
+            description=data.get("description", ""),
+            context_id=data.get("contextId"),
+            status=data.get("status", "open"),
             message_id=message_id
         )
     else:

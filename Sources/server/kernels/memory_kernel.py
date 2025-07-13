@@ -4,7 +4,7 @@ Memory kernel implementation for the SwiftCog Python server.
 from typing import Callable, Optional, Dict, Any, List
 import ray
 from datetime import datetime
-from swiftcog_types import KernelID, KernelMessage, TextMessage, GazeMessage, ConceptCreationRequest, ConversationMessage
+from swiftcog_types import KernelID, KernelMessage, TextMessage, GazeMessage, ConceptCreationRequest, ConversationMessage, GoalCreationRequest
 from .base_kernel import BaseKernel
 from tools.concept_graph import ConceptGraph, Concept
 
@@ -260,6 +260,22 @@ class MemoryKernel(BaseKernel):
         else:
             print(f"MemoryKernel: Unknown concept type: {concept_type}")
     
+    def _handle_goal_creation_request(self, request: GoalCreationRequest) -> None:
+        """Handle request to create a new goal."""
+        print(f"MemoryKernel: Creating goal '{request.description}' with status '{request.status}'")
+        
+        # Use the concept graph's add_goal method
+        goal_id = self.concept_graph.add_goal(
+            description=request.description,
+            status=request.status,
+            context_id=request.context_id or self._current_session_id
+        )
+        
+        print(f"MemoryKernel: Created goal with ID: {goal_id}")
+        
+        # Activate the goal concept since it's current
+        self.concept_graph.activate(goal_id, strength=1.0)
+    
     def search_memory(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Search memory using text matching."""
         results = self.concept_graph.search_by_label(query, k=limit)
@@ -293,6 +309,13 @@ class MemoryKernel(BaseKernel):
         if isinstance(message, ConceptCreationRequest):
             print(f"[{timestamp}] MemoryKernel: Processing ConceptCreationRequest")
             self._handle_concept_creation_request(message)
+            print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
+            return
+        
+        # Handle GoalCreationRequest messages
+        if isinstance(message, GoalCreationRequest):
+            print(f"[{timestamp}] MemoryKernel: Processing GoalCreationRequest")
+            self._handle_goal_creation_request(message)
             print(f"MemoryKernel: ConceptGraph has {self.concept_graph.size()} concepts")
             return
         

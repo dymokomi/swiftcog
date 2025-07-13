@@ -90,6 +90,7 @@ class SensingKernel(BaseKernel):
             
             # Send person presence data to learning kernel (non-blocking)
             await self.send_to_kernel(KernelID.LEARNING, presence_message)
+            
 
         except Exception as e:
             print(f"SensingKernel: Error processing gaze data: {e}")
