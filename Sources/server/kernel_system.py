@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any, Callable
 import websockets
 from websockets.server import WebSocketServerProtocol
 import ray
-from swiftcog_types import KernelID, KernelMessage, AsyncMessage, MessageType, TextMessage, GazeMessage, VoiceMessage
+from swiftcog_types import KernelID, KernelMessage, AsyncMessage, MessageType, TextMessage, GazeMessage
 from kernels import (
     SensingKernel,
     ExecutiveKernel,
@@ -117,8 +117,6 @@ class KernelSystemActor:
             return f"text: '{message.content}'"
         elif isinstance(message, GazeMessage):
             return f"gaze: looking={message.looking_at_screen}"
-        elif isinstance(message, VoiceMessage):
-            return f"voice: '{message.transcription}'"
         else:
             return f"{message.get_message_type()}: {type(message).__name__}"
 

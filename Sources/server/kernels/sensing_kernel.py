@@ -3,7 +3,7 @@ Sensing kernel implementation for the SwiftCog Python server.
 """
 from typing import Callable, Optional
 import ray
-from swiftcog_types import KernelID, KernelMessage, GazeMessage, VoiceMessage, TextMessage, PersonPresenceMessage
+from swiftcog_types import KernelID, KernelMessage, GazeMessage, TextMessage, PersonPresenceMessage
 from .base_kernel import BaseKernel
 from tools.vector_recognition import VectorRecognition
 

@@ -4,7 +4,7 @@ Executive kernel implementation for the SwiftCog Python server.
 from typing import Callable, Optional
 import ray
 import datetime
-from swiftcog_types import KernelID, KernelMessage, TextMessage, VoiceMessage, TextBubbleCommand, ShowThinkingCommand, HideThinkingCommand, create_display_command_json, ConversationMessage
+from swiftcog_types import KernelID, KernelMessage, TextMessage, TextBubbleCommand, ShowThinkingCommand, HideThinkingCommand, create_display_command_json, ConversationMessage
 from .base_kernel import BaseKernel
 
 
@@ -18,11 +18,12 @@ class ExecutiveKernel(BaseKernel):
     async def receive(self, message: KernelMessage) -> None:
         """Process executive decisions using LLM (non-blocking, real-time)."""
         try:
-            # Extract content from different message types
-            content = self._extract_content_from_message(message)
-            if not content:
+            # Executive kernel only processes TextMessage types
+            if not isinstance(message, TextMessage):
+                print(f"ExecutiveKernel: Unsupported message type: {type(message)}")
                 return
             
+            content = message.content
             start_time = self._get_current_time()
             print(f"[{start_time}] ExecutiveKernel: Processing '{content}'")
             
@@ -52,16 +53,6 @@ class ExecutiveKernel(BaseKernel):
         except Exception as e:
             print(f"ExecutiveKernel: Error: {str(e)}")
             await self._handle_error(e)
-    
-    def _extract_content_from_message(self, message: KernelMessage) -> Optional[str]:
-        """Extract content from different message types."""
-        if isinstance(message, TextMessage):
-            return message.content
-        elif isinstance(message, VoiceMessage):
-            return message.transcription
-        else:
-            print(f"ExecutiveKernel: Unsupported message type: {type(message)}")
-            return None
     
     def _get_current_time(self) -> str:
         """Get current time formatted as HH:MM:SS.mmm"""

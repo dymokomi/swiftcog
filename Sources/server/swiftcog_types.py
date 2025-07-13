@@ -84,30 +84,6 @@ class GazeMessage(KernelMessage):
 
 
 @dataclass
-class VoiceMessage(KernelMessage):
-    """Message containing voice/speech data."""
-    transcription: str
-    confidence: Optional[float] = None
-    
-    def __init__(self, source_kernel_id: KernelID, transcription: str, confidence: Optional[float] = None, message_id: Optional[str] = None):
-        super().__init__(source_kernel_id, message_id)
-        self.transcription = transcription
-        self.confidence = confidence
-    
-    def get_message_type(self) -> str:
-        return "voiceData"
-    
-    def to_dict(self) -> Dict[str, Any]:
-        result = self.get_base_dict()
-        result.update({
-            "transcription": self.transcription
-        })
-        if self.confidence is not None:
-            result["confidence"] = self.confidence
-        return result
-
-
-@dataclass
 class ThoughtMessage(KernelMessage):
     """Message containing thought/reasoning data."""
     content: str
@@ -280,13 +256,6 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
             feature_vector_dimensions=data.get("featureVectorDimensions"),
             message_id=message_id
         )
-    elif message_type == "voiceData":
-        return VoiceMessage(
-            source_kernel_id=source_kernel_id,
-            transcription=data.get("transcription", ""),
-            confidence=data.get("confidence"),
-            message_id=message_id
-        )
     elif message_type == "thoughtData":
         return ThoughtMessage(
             source_kernel_id=source_kernel_id,
@@ -321,7 +290,8 @@ def create_kernel_message_from_dict(data: Dict[str, Any]) -> KernelMessage:
             store_in_memory=data.get("storeInMemory", True),
             message_id=message_id
         )
-    else:  # textData or unknown
+    else:
+        # Default to TextMessage for unknown types
         return TextMessage(
             source_kernel_id=source_kernel_id,
             content=data.get("content", data.get("payload", "")),
