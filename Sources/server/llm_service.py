@@ -6,10 +6,57 @@ from typing import Optional, List, Dict, Any, Callable
 import openai
 import os
 import json
+import yaml
+import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+
+class LLMTracer:
+    """LLM tracing utility for logging prompts and responses."""
+    
+    def __init__(self, log_dir: str = "logs"):
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+        
+    def trace_llm_call(self, template_name: str, system_prompt: str, user_message: str, 
+                      response: str, tools: list = None, metadata: dict = None):
+        """Log an LLM call with all context."""
+        try:
+            timestamp = datetime.datetime.now()
+            
+            # Create trace data in a more readable format
+            trace_data = {
+                "timestamp": timestamp.isoformat(),
+                "template_name": template_name,
+                "metadata": metadata or {},
+                "tools_available": [tool.name if hasattr(tool, 'name') else str(tool) for tool in (tools or [])],
+                "system_prompt": system_prompt,
+                "user_message": user_message,
+                "response": response
+            }
+            
+            # Create filename with timestamp and template name
+            safe_template = template_name.replace("/", "_").replace("\\", "_")
+            timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # milliseconds
+            filename = f"{safe_template}_{timestamp_str}.yaml"
+            
+            # Save to template-specific subdirectory
+            template_dir = self.log_dir / safe_template
+            template_dir.mkdir(exist_ok=True)
+            
+            filepath = template_dir / filename
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                yaml.dump(trace_data, f, default_flow_style=False, allow_unicode=True, width=120)
+                
+            print(f"LLMTracer: Saved trace to {filepath}")
+            
+        except Exception as e:
+            print(f"LLMTracer: Error saving trace: {e}")
 
 
 class ToolDefinition:
@@ -163,23 +210,42 @@ class OpenAIProvider(LLMProvider):
 class LLMService:
     """LLM service wrapper matching the Swift implementation."""
     
-    def __init__(self, provider: LLMProvider):
+    def __init__(self, provider: LLMProvider, enable_tracing: bool = True):
         self.provider = provider
+        self.tracer = LLMTracer() if enable_tracing else None
     
     async def process_message(
         self,
         message: str,
         system_prompt: str,
         temperature: float = 0.7,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        template_name: str = "unknown"
     ) -> str:
         """Process a message using the LLM provider."""
-        return await self.provider.generate_completion(
+        response = await self.provider.generate_completion(
             system_prompt=system_prompt,
             user_message=message,
             temperature=temperature,
             max_tokens=max_tokens
         )
+        
+        # Log the trace
+        if self.tracer:
+            metadata = {
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "has_tools": False
+            }
+            self.tracer.trace_llm_call(
+                template_name=template_name,
+                system_prompt=system_prompt,
+                user_message=message,
+                response=response or '',  # Handle None response
+                metadata=metadata
+            )
+        
+        return response
     
     async def process_message_with_tools(
         self,
@@ -188,10 +254,11 @@ class LLMService:
         tools: List[ToolDefinition],
         temperature: float = 0.7,
         max_tokens: int = 500,
-        max_tool_calls: int = 1
+        max_tool_calls: int = 1,
+        template_name: str = "unknown"
     ) -> Dict[str, Any]:
         """Process a message with tool calling support."""
-        return await self.provider.generate_completion_with_tools(
+        response = await self.provider.generate_completion_with_tools(
             system_prompt=system_prompt,
             user_message=message,
             tools=tools,
@@ -199,6 +266,30 @@ class LLMService:
             max_tokens=max_tokens,
             max_tool_calls=max_tool_calls
         )
+        
+        # Log the trace
+        if self.tracer:
+            metadata = {
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "max_tool_calls": max_tool_calls,
+                "has_tools": True,
+                "tool_calls_made": len(response.get('tool_calls', []))
+            }
+            response_content = response.get('content') or ''  # Handle None safely
+            response_text = response_content + (
+                f" [TOOLS: {len(response.get('tool_calls', []))} calls]" if response.get('tool_calls') else ""
+            )
+            self.tracer.trace_llm_call(
+                template_name=template_name,
+                system_prompt=system_prompt,
+                user_message=message,
+                response=response_text,
+                tools=tools,
+                metadata=metadata
+            )
+        
+        return response
     
     async def execute_tools(self, tool_calls: List[Dict[str, Any]], available_tools: List[ToolDefinition]) -> List[Dict[str, Any]]:
         """Execute tool calls and return results."""

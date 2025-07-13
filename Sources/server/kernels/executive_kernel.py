@@ -5,9 +5,10 @@ from typing import Callable, Optional
 import ray
 import datetime
 import asyncio
-from swiftcog_types import KernelID, KernelMessage, TextMessage, TextBubbleCommand, ShowThinkingCommand, HideThinkingCommand, create_display_command_json, ConversationMessage, GoalCreationRequest
+from swiftcog_types import KernelID, KernelMessage, TextMessage, TextBubbleCommand, ShowThinkingCommand, HideThinkingCommand, create_display_command_json, ConversationMessage, GoalCreationRequest, ConceptCreationRequest
 from .base_kernel import BaseKernel
 from llm_template import llm_template
+from llm_service import ToolDefinition, LLMService, OpenAIProvider
 
 
 @ray.remote
@@ -21,6 +22,195 @@ class ExecutiveKernel(BaseKernel):
         self.is_processing_proactive = False
         self.proactive_check_interval = 5.0  # seconds
         self._thinking_shown = False
+        
+        # Initialize LLM service
+        try:
+            openai_provider = OpenAIProvider()
+            self.llm_service = LLMService(openai_provider)
+        except Exception as e:
+            print(f"ExecutiveKernel: Failed to initialize LLM service: {e}")
+            self.llm_service = None
+        
+        # Initialize tools for goal and knowledge management
+        self._initialize_tools()
+    
+    def _initialize_tools(self) -> None:
+        """Initialize the available tools for executive decision making."""
+        # Complete goal tool
+        complete_goal_tool = ToolDefinition(
+            name="complete_goal",
+            description="Mark a learning goal as completed when you have achieved the learning objective",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "goal_id": {
+                        "type": "string", 
+                        "description": "ID of the goal to mark as completed"
+                    },
+                    "completion_summary": {
+                        "type": "string",
+                        "description": "Brief summary of what was learned or achieved"
+                    }
+                },
+                "required": ["goal_id", "completion_summary"]
+            },
+            function=self._complete_goal_tool
+        )
+        
+        # Add knowledge tool
+        add_knowledge_tool = ToolDefinition(
+            name="add_knowledge",
+            description="Add new factual knowledge or concepts to memory for future reference",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "knowledge_type": {
+                        "type": "string",
+                        "description": "Type of knowledge (personal_info, concept, fact, preference, etc.)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description of the knowledge to store"
+                    },
+                    "details": {
+                        "type": "object",
+                        "description": "Additional structured details about this knowledge"
+                    }
+                },
+                "required": ["knowledge_type", "description"]
+            },
+            function=self._add_knowledge_tool
+        )
+        
+        # Create goal tool
+        create_goal_tool = ToolDefinition(
+            name="create_goal",
+            description="Create a new learning goal when you identify something important to learn",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Natural language description of the learning goal"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "Priority level: high, medium, low",
+                        "enum": ["high", "medium", "low"]
+                    }
+                },
+                "required": ["description"]
+            },
+            function=self._create_goal_tool
+        )
+        
+        # Respond only tool (no-op, just respond)
+        respond_only_tool = ToolDefinition(
+            name="respond_only",
+            description="Just respond to the user without taking any goal or memory actions",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief reason for not taking any actions"
+                    }
+                },
+                "required": ["reason"]
+            },
+            function=self._respond_only_tool
+        )
+        
+        self.available_tools = [complete_goal_tool, add_knowledge_tool, create_goal_tool, respond_only_tool]
+    
+    async def _complete_goal_tool(self, goal_id: str, completion_summary: str) -> str:
+        """Tool function to mark a goal as completed."""
+        try:
+            # Update goal status to completed
+            memory_kernel = ray.get_actor("MemoryKernel")
+            success = await memory_kernel.update_concept.remote(
+                goal_id,
+                {"data": {"status": "completed", "completion_summary": completion_summary}}
+            )
+            
+            if success:
+                print(f"ExecutiveKernel: Completed goal {goal_id}: {completion_summary}")
+                return f"Goal completed: {completion_summary}"
+            else:
+                return f"Error: Could not find goal {goal_id} to complete"
+                
+        except Exception as e:
+            print(f"ExecutiveKernel: Error completing goal {goal_id}: {e}")
+            return f"Error completing goal: {str(e)}"
+    
+    async def _add_knowledge_tool(self, knowledge_type: str, description: str, details: dict = None) -> str:
+        """Tool function to add knowledge to memory via Learning kernel."""
+        try:
+            # Get memory kernel to find active person percepts
+            memory_kernel = ray.get_actor("MemoryKernel")
+            
+            # Create a concept creation request for the knowledge
+            concept_data = {
+                "knowledge_type": knowledge_type,
+                "description": description,
+                "details": details or {},
+                "source": "executive_conversation"
+            }
+            
+            # If this is personal information, try to link it to active person percepts
+            person_percept_id = None
+            if knowledge_type == "personal_info":
+                # Get active person percepts
+                person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
+                active_percepts = [p for p in person_percepts if p.get("activation", 0) > 0]
+                
+                if active_percepts:
+                    # Use the most recently activated percept
+                    most_recent = max(active_percepts, key=lambda p: p.get("activation", 0))
+                    person_percept_id = most_recent.get("id")
+                    concept_data["linked_person_percept"] = person_percept_id
+                    print(f"ExecutiveKernel: Linking personal knowledge to person percept {person_percept_id}")
+            
+            concept_request = ConceptCreationRequest(
+                source_kernel_id=KernelID.EXECUTIVE,
+                concept_type="knowledge",
+                concept_data=concept_data
+            )
+            
+            # Send to Learning kernel for storage
+            await self.send_to_kernel(KernelID.LEARNING, concept_request)
+            
+            print(f"ExecutiveKernel: Added knowledge - {knowledge_type}: {description}")
+            return f"Added knowledge: {description}"
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error adding knowledge: {e}")
+            return f"Error adding knowledge: {str(e)}"
+    
+    async def _create_goal_tool(self, description: str, priority: str = "medium") -> str:
+        """Tool function to create a new learning goal via Learning kernel."""
+        try:
+            # Create a goal creation request
+            goal_request = GoalCreationRequest(
+                source_kernel_id=KernelID.EXECUTIVE,
+                description=description,
+                status="open"
+            )
+            
+            # Send to Learning kernel for creation
+            await self.send_to_kernel(KernelID.LEARNING, goal_request)
+            
+            print(f"ExecutiveKernel: Created new goal: {description}")
+            return f"Created learning goal: {description}"
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error creating goal: {e}")
+            return f"Error creating goal: {str(e)}"
+    
+    async def _respond_only_tool(self, reason: str) -> str:
+        """Tool function for when no actions are needed, just responding."""
+        print(f"ExecutiveKernel: Responding only - {reason}")
+        return f"No actions taken: {reason}"
         
     async def start_proactive_monitoring(self) -> None:
         """Start the proactive goal checking background task."""
@@ -76,11 +266,9 @@ class ExecutiveKernel(BaseKernel):
             start_time = self._get_current_time()
             print(f"[{start_time}] ExecutiveKernel: Starting proactive goal check")
             
-            # Get necessary services
-            kernel_system_actor = ray.get_actor("KernelSystemActor")
-            llm_service = await kernel_system_actor.get_shared_llm_service.remote()
-            if not llm_service:
-                print("ExecutiveKernel: Shared LLM service not available for proactive check")
+            # Check if local LLM service is available
+            if not self.llm_service:
+                print("ExecutiveKernel: Local LLM service not available for proactive check")
                 return
                 
             memory_kernel = ray.get_actor("MemoryKernel")
@@ -102,7 +290,7 @@ class ExecutiveKernel(BaseKernel):
             
             # Process with LLM to get proactive question
             proactive_question = await self._process_proactive_check_with_llm(
-                goals_data, conversation_context, llm_service
+                goals_data, conversation_context
             )
             
             # Hide thinking indicator
@@ -176,9 +364,14 @@ class ExecutiveKernel(BaseKernel):
                 "person_percepts_info": "No person percepts available"
             }
     
-    async def _process_proactive_check_with_llm(self, goals_data: dict, conversation_context: str, llm_service) -> Optional[str]:
+    async def _process_proactive_check_with_llm(self, goals_data: dict, conversation_context: str) -> Optional[str]:
         """Use LLM to process goals and generate proactive question."""
         try:
+            # Check if local LLM service is available
+            if not self.llm_service:
+                print("ExecutiveKernel: Local LLM service not available for proactive check")
+                return None
+                
             # Format goals for template
             goals_list_str = ""
             for i, goal in enumerate(goals_data["goals_list"], 1):
@@ -204,13 +397,18 @@ class ExecutiveKernel(BaseKernel):
             llm_start = self._get_current_time()
             print(f"[{llm_start}] ExecutiveKernel: Starting proactive LLM processing")
             
-            # Use the shared LLM service to process the proactive check
-            proactive_question = await llm_service.process_message.remote(
-                user_message,
+            # Use the local LLM service to process the proactive check
+            proactive_question = await self.llm_service.process_message(
+                message=user_message,
                 system_prompt=system_prompt,
                 temperature=0.7,
-                max_tokens=200
+                max_tokens=200,
+                template_name="proactive_goal_check"
             )
+            
+            # Handle None response safely
+            if proactive_question is None:
+                proactive_question = ""
             
             llm_end = self._get_current_time()
             print(f"[{llm_start} -> {llm_end}] LLM: Generated proactive question: {proactive_question}")
@@ -321,12 +519,7 @@ class ExecutiveKernel(BaseKernel):
             start_time = self._get_current_time()
             print(f"[{start_time}] ExecutiveKernel: Processing '{content}'")
             
-            # Get necessary actors
-            kernel_system_actor = ray.get_actor("KernelSystemActor")
-            llm_service = await kernel_system_actor.get_shared_llm_service.remote()
-            if not llm_service:
-                raise RuntimeError("Shared LLM service not initialized")
-            
+            # Get necessary actors  
             memory_kernel = ray.get_actor("MemoryKernel")
             
             # Process the user input through the pipeline
@@ -335,11 +528,16 @@ class ExecutiveKernel(BaseKernel):
             await self._show_thinking_indicator(start_time)
             
             conversation_context = await self._get_conversation_context(memory_kernel)
-            ai_response = await self._process_with_llm(content, conversation_context, llm_service)
+            ai_response = await self._process_with_llm(content, conversation_context)
             
-            await self._store_ai_response(ai_response)
             await self._hide_thinking_indicator()
-            await self._show_ai_response_bubble(ai_response)
+            
+            # Only send response if we have content
+            if ai_response:
+                await self._store_ai_response(ai_response)
+                await self._show_ai_response_bubble(ai_response)
+            else:
+                print("ExecutiveKernel: No response to send, skipping AI response bubble")
             
         except ValueError as e:
             print(f"ExecutiveKernel: Error - Required kernel not found: {str(e)}")
@@ -406,33 +604,147 @@ class ExecutiveKernel(BaseKernel):
         
         return "\n".join(context_messages) if context_messages else "No previous conversation."
     
-    async def _process_with_llm(self, content: str, conversation_context: str, llm_service) -> str:
-        """Use LLM to process with conversation context."""
-        # Use template system to generate prompts
-        template_result = llm_template.call(
-            "executive_decision",
-            conversation_context=conversation_context,
-            current_input=content
-        )
-        
-        system_prompt = template_result['system_prompt']
-        user_message = template_result['user_message']
-        
-        llm_start = self._get_current_time()
-        print(f"[{llm_start}] ExecutiveKernel: Starting LLM processing")
-        
-        # Use the shared LLM service to process the message
-        ai_response = await llm_service.process_message.remote(
-            user_message,
-            system_prompt=system_prompt,
-            temperature=0.7,
-            max_tokens=500
-        )
-        
-        llm_end = self._get_current_time()
-        print(f"[{llm_start} -> {llm_end}] LLM: Generated response: {ai_response}")
-        
-        return ai_response
+    async def _process_with_llm(self, content: str, conversation_context: str) -> str:
+        """Use LLM to process with conversation context, goals, and tools."""
+        try:
+            # Check if local LLM service is available
+            if not self.llm_service:
+                print("ExecutiveKernel: Local LLM service not available, falling back to basic response")
+                return "I'm sorry, but I can't process your message right now due to a configuration issue."
+            
+            # Get current goals and person context
+            memory_kernel = ray.get_actor("MemoryKernel")
+            goals_data = await self._get_goals_for_conversation_context(memory_kernel)
+            person_context = await self._get_person_context(memory_kernel)
+            
+            # Use template system to generate prompts with full context
+            template_result = llm_template.call(
+                "executive_decision",
+                conversation_context=conversation_context,
+                current_input=content,
+                current_goals=goals_data,
+                person_context=person_context
+            )
+            
+            system_prompt = template_result['system_prompt']
+            user_message = template_result['user_message']
+            
+            llm_start = self._get_current_time()
+            print(f"[{llm_start}] ExecutiveKernel: Starting LLM processing with tools")
+            
+            # Use the local LLM service with tools
+            response = await self.llm_service.process_message_with_tools(
+                message=user_message,
+                system_prompt=system_prompt,
+                tools=self.available_tools,
+                temperature=0.7,
+                max_tokens=500,
+                max_tool_calls=3,
+                template_name="executive_decision"
+            )
+            
+            llm_end = self._get_current_time()
+            # Handle None response content safely
+            ai_response = (response.get('content') or '').strip()
+            print(f"[{llm_start} -> {llm_end}] LLM: Generated response with {len(response.get('tool_calls', []))} tool calls")
+            
+            # Execute any tool calls
+            tool_executed = False
+            if response.get('tool_calls'):
+                print(f"ExecutiveKernel: Executing {len(response['tool_calls'])} tool calls")
+                tool_results = await self.llm_service.execute_tools(response['tool_calls'], self.available_tools)
+                
+                # Log tool execution results and check for successful non-respond_only tools
+                for result in tool_results:
+                    if result['success']:
+                        print(f"ExecutiveKernel: Tool {result['function']} executed successfully: {result['result']}")
+                        if result['function'] != 'respond_only':
+                            tool_executed = True
+                    else:
+                        print(f"ExecutiveKernel: Tool {result['function']} failed: {result['result']}")
+            
+            # Handle empty responses
+            if not ai_response or ai_response.lower() in ['none', 'null', '']:
+                if tool_executed:
+                    # If tools were executed but no response, provide a friendly default
+                    ai_response = "Got it! I've updated my understanding accordingly."
+                    print("ExecutiveKernel: Provided default response for tool execution without text")
+                else:
+                    # If no tools and no response, return None to skip sending message
+                    print("ExecutiveKernel: Empty response with no tools executed, skipping message")
+                    return None
+            
+            return ai_response
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error in LLM processing: {e}")
+            # Always return a response for errors
+            return f"I encountered an error processing your message: {str(e)}"
+    
+    async def _get_goals_for_conversation_context(self, memory_kernel) -> str:
+        """Get current goals formatted for conversation context."""
+        try:
+            all_goals = await memory_kernel.get_concepts_by_type.remote("goal")
+            
+            if not all_goals:
+                return "No current learning goals."
+            
+            # Filter for open and in_progress goals (not completed)
+            active_goals = [goal for goal in all_goals if goal.get("data", {}).get("status") in ["open", "in_progress"]]
+            
+            if not active_goals:
+                return "No active learning goals."
+            
+            # Format goals for context
+            goals_list = []
+            for i, goal in enumerate(active_goals, 1):
+                goal_info = goal.get("data", {})
+                description = goal_info.get("description", "No description")
+                status = goal_info.get("status", "unknown")
+                activation = goal.get("activation", 0)
+                goal_id = goal.get("id", "unknown")
+                
+                goals_list.append(f"{i}. [{goal_id}] {description} (Status: {status}, Activation: {activation:.2f})")
+            
+            return "Current learning goals:\n" + "\n".join(goals_list)
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error getting goals for context: {e}")
+            return "Error retrieving learning goals."
+    
+    async def _get_person_context(self, memory_kernel) -> str:
+        """Get person context information."""
+        try:
+            # Get active person percepts
+            person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
+            active_percepts = [p for p in person_percepts if p.get("activation", 0) > 0]
+            
+            # Get knowledge concepts
+            knowledge_concepts = await memory_kernel.get_concepts_by_type.remote("knowledge")
+            recent_knowledge = sorted(knowledge_concepts, key=lambda k: k.get("meta", {}).get("created", 0), reverse=True)[:5]
+            
+            context_parts = []
+            
+            if active_percepts:
+                percept_info = []
+                for percept in active_percepts:
+                    person_id = percept.get("data", {}).get("person_id", "unknown")
+                    percept_info.append(f"person_{person_id}")
+                context_parts.append(f"Currently perceiving: {', '.join(percept_info)}")
+            
+            if recent_knowledge:
+                knowledge_info = []
+                for knowledge in recent_knowledge:
+                    knowledge_type = knowledge.get("data", {}).get("knowledge_type", "unknown")
+                    description = knowledge.get("data", {}).get("description", "")[:100]
+                    knowledge_info.append(f"- {knowledge_type}: {description}")
+                context_parts.append("Recent knowledge:\n" + "\n".join(knowledge_info))
+            
+            return "\n\n".join(context_parts) if context_parts else "No person context available."
+            
+        except Exception as e:
+            print(f"ExecutiveKernel: Error getting person context: {e}")
+            return "Error retrieving person context."
     
     async def _store_ai_response(self, ai_response: str) -> None:
         """Store AI response in conversation memory (non-blocking)."""

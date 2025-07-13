@@ -30,6 +30,7 @@ user_message: |
   Available information:
   - Person concepts found: {{person_concepts_count}}
   - Person percepts found: {{person_percepts_count}}
+  - Knowledge about this person: {{person_knowledge_count}}
   - Person-specific learning goals: {{person_specific_goals_count}}
   - All learning goals: {{all_goals_count}}
   - Recent conversation messages: {{conversation_history_count}}
@@ -37,6 +38,7 @@ user_message: |
   Detailed context:
   Person concepts: {{person_concepts}}
   Person percepts: {{person_percepts}}
+  Knowledge about this person: {{person_knowledge}}
   Person-specific goals: {{person_specific_goals}}
   All learning goals: {{all_goals}}
   Recent conversations: {{conversation_history}}
@@ -53,11 +55,13 @@ metadata:
     - person_id
     - person_concepts_count
     - person_percepts_count
+    - person_knowledge_count
     - person_specific_goals_count
     - all_goals_count
     - conversation_history_count
     - person_concepts
     - person_percepts
+    - person_knowledge
     - person_specific_goals
     - all_goals
     - conversation_history 

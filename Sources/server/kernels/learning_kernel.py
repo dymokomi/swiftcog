@@ -86,6 +86,45 @@ class LearningKernel(BaseKernel):
         """Tool function to do nothing - used when no goal needs to be created."""
         return f"No action taken: {reason}"
     
+    async def _get_person_knowledge(self, memory_kernel, person_id: str) -> list:
+        """Get knowledge concepts that are linked to this person's percept."""
+        try:
+            # First find the person's percept
+            person_percepts = await memory_kernel.search_concepts.remote(f"person percept {person_id}", limit=10, concept_type="percept")
+            
+            if not person_percepts:
+                return []
+            
+            # Get the most relevant percept (first one)
+            person_percept = person_percepts[0]
+            percept_id = person_percept.get("id")
+            
+            if not percept_id:
+                return []
+            
+            # Get all knowledge concepts
+            all_knowledge = await memory_kernel.get_concepts_by_type.remote("knowledge")
+            
+            # Filter knowledge that's linked to this person's percept
+            person_knowledge = []
+            for knowledge in all_knowledge:
+                knowledge_data = knowledge.get("data", {})
+                if knowledge_data.get("linked_person_percept") == percept_id:
+                    person_knowledge.append({
+                        "id": knowledge.get("id"),
+                        "type": knowledge_data.get("knowledge_type", "unknown"),
+                        "description": knowledge_data.get("description", ""),
+                        "details": knowledge_data.get("details", {}),
+                        "activation": knowledge.get("activation", 0)
+                    })
+            
+            print(f"LearningKernel: Found {len(person_knowledge)} knowledge items linked to person {person_id}")
+            return person_knowledge
+            
+        except Exception as e:
+            print(f"LearningKernel: Error getting person knowledge for {person_id}: {e}")
+            return []
+    
     async def _analyze_learning_opportunities(self, person_id: str) -> None:
         """Analyze the current context using LLM to identify learning opportunities and create appropriate goals."""
         if not self.llm_service:
@@ -99,6 +138,9 @@ class LearningKernel(BaseKernel):
             # Search for person-related concepts
             person_concepts = await memory_kernel.search_concepts.remote(f"person {person_id}", limit=10, concept_type="person")
             person_percepts = await memory_kernel.search_concepts.remote(f"person percept {person_id}", limit=10, concept_type="percept")
+            
+            # Get knowledge connected to this person's percept
+            person_knowledge = await self._get_person_knowledge(memory_kernel, person_id)
             
             # Search for existing goals (both specific to this person and general learning goals)
             person_specific_goals = await memory_kernel.search_concepts.remote(f"learn person {person_id}", limit=10, concept_type="goal")
@@ -123,11 +165,13 @@ class LearningKernel(BaseKernel):
                 person_id=person_id,
                 person_concepts_count=len(person_concepts),
                 person_percepts_count=len(person_percepts),
+                person_knowledge_count=len(person_knowledge),
                 person_specific_goals_count=len(person_specific_goals),
                 all_goals_count=len(all_goals),
                 conversation_history_count=len(conversation_history),
                 person_concepts=person_concepts,
                 person_percepts=person_percepts,
+                person_knowledge=person_knowledge,
                 person_specific_goals=person_specific_goals,
                 all_goals=all_goals,
                 conversation_history=conversation_history
@@ -143,7 +187,8 @@ class LearningKernel(BaseKernel):
                 tools=self.available_tools,
                 temperature=0.3,
                 max_tokens=200,
-                max_tool_calls=1
+                max_tool_calls=1,
+                template_name="learning_opportunities"
             )
             
             print(f"LearningKernel: LLM analysis response for context with person {person_id}: {response.get('content', 'No content')}")
@@ -246,6 +291,24 @@ class LearningKernel(BaseKernel):
             
             send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
             print(f"[{timestamp} -> {send_time}] LearningKernel -> MemoryKernel (conversation, non-blocking)")
+            
+        elif isinstance(message, ConceptCreationRequest):
+            print(f"[{timestamp}] LearningKernel: Processing ConceptCreationRequest for {message.concept_type}")
+            
+            # Forward to MemoryKernel for storage (non-blocking)
+            await self.send_to_kernel(KernelID.MEMORY, message)
+            
+            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp} -> {send_time}] LearningKernel -> MemoryKernel (concept creation, non-blocking)")
+            
+        elif isinstance(message, GoalCreationRequest):
+            print(f"[{timestamp}] LearningKernel: Processing GoalCreationRequest: {message.description}")
+            
+            # Forward to MemoryKernel for storage (non-blocking)
+            await self.send_to_kernel(KernelID.MEMORY, message)
+            
+            send_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp} -> {send_time}] LearningKernel -> MemoryKernel (goal creation, non-blocking)")
                 
         else:
             print(f"[{timestamp}] LearningKernel: Unsupported message type: {type(message)}")

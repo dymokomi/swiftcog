@@ -261,6 +261,33 @@ class MemoryKernel(BaseKernel):
             # Activate the percept concept since it's current
             self.concept_graph.activate(percept_concept.id, strength=1.0)
             
+        elif concept_type == "knowledge":
+            # Create a knowledge concept
+            knowledge_label = concept_data.get("description", f"Knowledge: {concept_data.get('knowledge_type', 'unknown')}")
+            
+            knowledge_concept = Concept(
+                ctype="knowledge",
+                label=knowledge_label,
+                data=concept_data
+            )
+            
+            self.concept_graph.add(knowledge_concept)
+            print(f"MemoryKernel: Created knowledge concept with ID: {knowledge_concept.id}")
+            
+            # Link the knowledge to the current session context
+            if self._current_session_id:
+                self.concept_graph.relate(knowledge_concept.id, self._current_session_id, "inContext")
+                print(f"MemoryKernel: Linked knowledge {knowledge_concept.id} to session context {self._current_session_id}")
+            
+            # If this knowledge is linked to a person percept, create that relationship
+            linked_person_percept = concept_data.get("linked_person_percept")
+            if linked_person_percept:
+                self.concept_graph.relate(knowledge_concept.id, linked_person_percept, "aboutPerson")
+                print(f"MemoryKernel: Linked knowledge {knowledge_concept.id} to person percept {linked_person_percept}")
+            
+            # Activate the knowledge concept since it's current
+            self.concept_graph.activate(knowledge_concept.id, strength=1.0)
+            
         else:
             print(f"MemoryKernel: Unknown concept type: {concept_type}")
     
