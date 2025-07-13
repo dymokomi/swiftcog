@@ -55,7 +55,8 @@ class LLMProvider(ABC):
         user_message: str,
         tools: List[ToolDefinition],
         temperature: float = 0.7,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        max_tool_calls: int = 1
     ) -> Dict[str, Any]:
         """Generate a completion with tool calling support."""
         pass
@@ -114,7 +115,8 @@ class OpenAIProvider(LLMProvider):
         user_message: str,
         tools: List[ToolDefinition],
         temperature: float = 0.7,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        max_tool_calls: int = 1
     ) -> Dict[str, Any]:
         """Generate a completion with tool calling support."""
         try:
@@ -143,7 +145,9 @@ class OpenAIProvider(LLMProvider):
             }
             
             if message.tool_calls:
-                for tool_call in message.tool_calls:
+                # Limit the number of tool calls to max_tool_calls
+                limited_tool_calls = message.tool_calls[:max_tool_calls]
+                for tool_call in limited_tool_calls:
                     result["tool_calls"].append({
                         "id": tool_call.id,
                         "function": tool_call.function.name,
@@ -183,7 +187,8 @@ class LLMService:
         system_prompt: str,
         tools: List[ToolDefinition],
         temperature: float = 0.7,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        max_tool_calls: int = 1
     ) -> Dict[str, Any]:
         """Process a message with tool calling support."""
         return await self.provider.generate_completion_with_tools(
@@ -191,7 +196,8 @@ class LLMService:
             user_message=message,
             tools=tools,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            max_tool_calls=max_tool_calls
         )
     
     async def execute_tools(self, tool_calls: List[Dict[str, Any]], available_tools: List[ToolDefinition]) -> List[Dict[str, Any]]:

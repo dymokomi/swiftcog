@@ -31,13 +31,13 @@ class LearningKernel(BaseKernel):
         # Create goal tool
         create_goal_tool = ToolDefinition(
             name="create_goal",
-            description="Create a new goal in memory when you need to learn more about a person who is not yet known",
+            description="Create a new learning goal in memory when you identify a learning opportunity or knowledge gap",
             parameters={
                 "type": "object",
                 "properties": {
                     "description": {
                         "type": "string",
-                        "description": "Natural language description of the goal"
+                        "description": "Natural language description of the learning goal"
                     }
                 },
                 "required": ["description"]
@@ -48,13 +48,13 @@ class LearningKernel(BaseKernel):
         # Do nothing tool
         do_nothing_tool = ToolDefinition(
             name="do_nothing",
-            description="Take no action - use this when no goal needs to be created or when a goal already exists",
+            description="Take no action - use this when no learning goals need to be created or when sufficient learning goals already exist",
             parameters={
                 "type": "object",
                 "properties": {
                     "reason": {
                         "type": "string",
-                        "description": "Reason for not creating a goal"
+                        "description": "Reason for not creating a learning goal"
                     }
                 },
                 "required": ["reason"]
@@ -85,96 +85,114 @@ class LearningKernel(BaseKernel):
         """Tool function to do nothing - used when no goal needs to be created."""
         return f"No action taken: {reason}"
     
-    async def _analyze_person_with_llm(self, person_id: str) -> None:
-        """Analyze a person using LLM to determine if a goal should be created."""
+    async def _analyze_learning_opportunities(self, person_id: str) -> None:
+        """Analyze the current context using LLM to identify learning opportunities and create appropriate goals."""
         if not self.llm_service:
-            print("LearningKernel: LLM service not available, skipping person analysis")
+            print("LearningKernel: LLM service not available, skipping learning opportunity analysis")
             return
         
         try:
-            # Get person information from memory
+            # Get current context information from memory
             memory_kernel = ray.get_actor("MemoryKernel")
             
             # Search for person-related concepts
             person_concepts = await memory_kernel.search_concepts.remote(f"person {person_id}", limit=10, concept_type="person")
             person_percepts = await memory_kernel.search_concepts.remote(f"person percept {person_id}", limit=10, concept_type="percept")
             
-            # Search for existing goals related to this person
-            existing_goals = await memory_kernel.search_concepts.remote(f"learn person {person_id}", limit=10, concept_type="goal")
+            # Search for existing goals (both specific to this person and general learning goals)
+            person_specific_goals = await memory_kernel.search_concepts.remote(f"learn person {person_id}", limit=10, concept_type="goal")
+            all_goals = await memory_kernel.search_concepts.remote(f"learn", limit=20, concept_type="goal")
             
-            # Build context for LLM
+            # Get recent conversation history for additional context
+            conversation_history = await memory_kernel.get_conversation_history.remote(limit=5)
+            
+            # Build comprehensive context for LLM
             context_info = {
                 "person_id": person_id,
                 "person_concepts": person_concepts,
                 "person_percepts": person_percepts,
-                "existing_goals": existing_goals
+                "person_specific_goals": person_specific_goals,
+                "all_learning_goals": all_goals,
+                "recent_conversations": conversation_history
             }
             
             # Create system prompt
-            system_prompt = """You are a learning system analyzing a person who has been detected. 
-Your task is to determine if you need to create a goal to learn more about this person.
+            system_prompt = """You are a learning system analyzing the current context to identify learning opportunities.
+Your task is to determine what single learning goal should be created based on the current situation.
 
-You should create a goal if:
-- The person has no name or identity information
-- The person is not well-known to the system
-- You need to learn more about who this person is
-- AND there are no existing goals already created for learning about this person
+You should create ONE learning goal if you identify:
+- Unknown persons who need to be identified
+- Gaps in knowledge about people, objects, or situations
+- Patterns or behaviors that could be learned from
+- Relationships between entities that are unclear
+- Missing information that would be valuable to learn
+- AND there are no existing goals already addressing this learning need
 
 You should use the do_nothing tool if:
-- The person is already well-known (has name/identity information)
-- There are already existing goals for learning about this person
-- No additional learning goals are needed
+- The current context is well-understood with sufficient information
+- There are already existing goals covering the learning opportunities
+- No significant knowledge gaps are present
 
-If you determine that a goal should be created, use the create_goal tool to create an appropriate goal.
-The goal should be in natural language, for example: "Learn the name and identity of the person with ID person_123"
+When creating goals, consider various types of learning opportunities:
+- Identity learning: "Learn the name and identity of person_123"
+- Behavioral learning: "Learn the communication patterns of person_456"
+- Relationship learning: "Learn how person_789 relates to other people in the context"
+- Preference learning: "Learn what topics person_123 is interested in"
+- Contextual learning: "Learn why person_456 visits at this time of day"
 
-Be concise and focused on the specific need to identify or learn about this person."""
+Focus on the SINGLE most important learning opportunity in the current context. You can only make one tool call."""
             
             # Create user message with context
             user_message = f"""
-Person detected: {person_id}
+Current context: Person {person_id} has been added to the active context.
 
-Context information:
+Available information:
 - Person concepts found: {len(person_concepts)}
 - Person percepts found: {len(person_percepts)}
-- Existing goals found: {len(existing_goals)}
+- Person-specific learning goals: {len(person_specific_goals)}
+- All learning goals: {len(all_goals)}
+- Recent conversation messages: {len(conversation_history)}
 
+Detailed context:
 Person concepts: {person_concepts}
 Person percepts: {person_percepts}
-Existing goals: {existing_goals}
+Person-specific goals: {person_specific_goals}
+All learning goals: {all_goals}
+Recent conversations: {conversation_history}
 
-Based on this information, determine if I need to create a goal to learn more about this person.
-If the person is not well-known or lacks identity information AND there are no existing goals for learning about them, create an appropriate goal.
-If there are already existing goals or the person is well-known, use the do_nothing tool.
+Analyze this context and identify the most important learning opportunity. Consider what we don't know about this person, their relationships, behaviors, or preferences. 
+Create ONE learning goal for the most significant knowledge gap, but avoid duplicating existing goals.
+If no new learning goals are needed, use the do_nothing tool with a clear reason.
 """
             
-            # Call LLM with tools
+            # Call LLM with tools (limit to one tool call)
             response = await self.llm_service.process_message_with_tools(
                 message=user_message,
                 system_prompt=system_prompt,
                 tools=self.available_tools,
                 temperature=0.3,
-                max_tokens=200
+                max_tokens=200,
+                max_tool_calls=1
             )
             
-            print(f"LearningKernel: LLM response for person {person_id}: {response.get('content', 'No content')}")
+            print(f"LearningKernel: LLM analysis response for context with person {person_id}: {response.get('content', 'No content')}")
             
             # Execute any tool calls
             if response.get('tool_calls'):
-                print(f"LearningKernel: Executing {len(response['tool_calls'])} tool calls")
+                print(f"LearningKernel: Executing {len(response['tool_calls'])} tool calls for learning opportunities")
                 tool_results = await self.llm_service.execute_tools(response['tool_calls'], self.available_tools)
                 
                 for result in tool_results:
                     if result['success']:
                         if result['function'] == 'do_nothing':
-                            print(f"LearningKernel: No action taken for person {person_id}: {result['result']}")
+                            print(f"LearningKernel: No learning goals created for person {person_id}: {result['result']}")
                         else:
-                            print(f"LearningKernel: Tool {result['function']} executed successfully: {result['result']}")
+                            print(f"LearningKernel: Learning goal tool {result['function']} executed successfully: {result['result']}")
                     else:
-                        print(f"LearningKernel: Tool {result['function']} failed: {result['result']}")
+                        print(f"LearningKernel: Learning goal tool {result['function']} failed: {result['result']}")
             
         except Exception as e:
-            print(f"LearningKernel: Error analyzing person {person_id}: {e}")
+            print(f"LearningKernel: Error analyzing learning opportunities for person {person_id}: {e}")
     
     async def _person_percept_exists(self, person_id: str) -> bool:
         """Check if a person percept already exists by querying MemoryKernel."""
@@ -243,9 +261,9 @@ If there are already existing goals or the person is well-known, use the do_noth
                     print(f"LearningKernel: Person percept for {message.person_id} already exists, updating context")
                     await self._update_person_percept_context(message.person_id)
                 
-                # After adding person percept to context, analyze with LLM to determine if goal should be created
-                print(f"LearningKernel: Analyzing person {message.person_id} with LLM")
-                await self._analyze_person_with_llm(message.person_id)
+                # After adding person percept to context, analyze for learning opportunities
+                print(f"LearningKernel: Analyzing learning opportunities for person {message.person_id}")
+                await self._analyze_learning_opportunities(message.person_id)
             else:
                 print("LearningKernel: Person not present or no person_id provided")
                 
