@@ -134,6 +134,10 @@ class MemoryKernel(BaseKernel):
         
         return formatted_results
     
+    def update_concept(self, cid: str, updates: Dict[str, Any]) -> bool:
+        """Update a concept's fields (for other kernels)."""
+        return self.concept_graph.update_concept(cid, updates)
+    
     def get_concept_graph_stats(self) -> Dict[str, Any]:
         """Get statistics about the concept graph (for other kernels)."""
         all_concepts = []
