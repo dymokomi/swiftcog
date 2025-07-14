@@ -18,7 +18,7 @@ class SensingKernel(BaseKernel):
         # Initialize vector recognition system
         self.vector_recognition = VectorRecognition(
             storage_file="gaze_vectors.json",
-            threshold=0.7,
+            threshold=0.82,
             max_vectors_per_id=10,
             expected_dimensions=768
         )
