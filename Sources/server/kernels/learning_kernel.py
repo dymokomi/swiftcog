@@ -275,6 +275,115 @@ class LearningKernel(BaseKernel):
         
         return "\n".join(conversation_items)
     
+    async def _get_person_name(self, memory_kernel, person_id: str) -> Optional[str]:
+        """Try to extract a person's name from their knowledge concepts."""
+        try:
+            # Get knowledge concepts linked to this person
+            person_knowledge = await self._get_person_knowledge(memory_kernel, person_id)
+            
+            # Look for personal_info knowledge that might contain their name
+            for knowledge in person_knowledge:
+                knowledge_type = knowledge.get("type", "")
+                description = knowledge.get("description", "").lower()
+                
+                if knowledge_type == "personal_info":
+                    # Check for common name patterns
+                    if "name is" in description:
+                        # Extract name after "name is"
+                        parts = description.split("name is")
+                        if len(parts) > 1:
+                            name_part = parts[1].strip().rstrip('.').split()[0]
+                            if name_part and len(name_part) > 1:
+                                return name_part.title()
+                    elif "called" in description:
+                        # Extract name after "called"
+                        parts = description.split("called")
+                        if len(parts) > 1:
+                            name_part = parts[1].strip().rstrip('.').split()[0]
+                            if name_part and len(name_part) > 1:
+                                return name_part.title()
+                    elif "i'm" in description or "i am" in description:
+                        # Extract name after "I'm" or "I am"
+                        for phrase in ["i'm", "i am"]:
+                            if phrase in description:
+                                parts = description.split(phrase)
+                                if len(parts) > 1:
+                                    name_part = parts[1].strip().rstrip('.').split()[0]
+                                    if name_part and len(name_part) > 1 and name_part not in ["a", "an", "the"]:
+                                        return name_part.title()
+            
+            return None
+            
+        except Exception as e:
+            print(f"LearningKernel: Error extracting person name for {person_id}: {e}")
+            return None
+    
+    async def _get_person_identifier(self, memory_kernel, person_id: str) -> str:
+        """Get the best identifier for a person: name if available, otherwise a friendly fallback."""
+        try:
+            # First check if this looks like a UUID (percept ID instead of person ID)
+            if len(person_id) == 36 and person_id.count('-') == 4:
+                # This is likely a percept UUID, try to find the actual person_id
+                try:
+                    person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
+                    for percept in person_percepts:
+                        if percept.get("id") == person_id:
+                            actual_person_id = percept.get("data", {}).get("person_id")
+                            if actual_person_id:
+                                person_id = actual_person_id
+                                break
+                except Exception as e:
+                    print(f"LearningKernel: Error finding person_id from percept {person_id}: {e}")
+            
+            # Try to extract a name
+            name = await self._get_person_name(memory_kernel, person_id)
+            if name:
+                return name
+            
+            # If no name found, check if person_id looks reasonable
+            if person_id and not (len(person_id) == 36 and person_id.count('-') == 4):
+                return person_id
+            
+            # Fallback for UUIDs or empty person_id
+            return "Unknown person"
+            
+        except Exception as e:
+            print(f"LearningKernel: Error getting person identifier for {person_id}: {e}")
+            return "Unknown person"
+    
+    async def _record_person_context_change(self, person_identifier: str, action: str) -> None:
+        """Record when a person enters or leaves context in conversation history."""
+        try:
+            # Create a conversation message about the context change
+            if action == "entered":
+                content = f"[Context] {person_identifier} entered the conversation"
+            elif action == "left":
+                content = f"[Context] {person_identifier} left the conversation"
+            else:
+                content = f"[Context] {person_identifier} {action} the conversation"
+            
+            # Store this as a system conversation message
+            context_conversation_message = ConversationMessage(
+                source_kernel_id=KernelID.LEARNING,
+                speaker="system",
+                content=content,
+                store_in_memory=True
+            )
+            
+            # Send directly to memory kernel for storage
+            try:
+                memory_kernel = ray.get_actor("MemoryKernel")
+                await memory_kernel.receive.remote(context_conversation_message)
+                print(f"LearningKernel: Recorded context change - {content}")
+            except Exception as memory_error:
+                print(f"LearningKernel: Error sending to memory kernel: {memory_error}")
+                # Fallback to routing system
+                await self.send_to_kernel(KernelID.MEMORY, context_conversation_message)
+                print(f"LearningKernel: Fallback - Recorded context change via routing - {content}")
+            
+        except Exception as e:
+            print(f"LearningKernel: Error recording person context change: {e}")
+
     async def _person_percept_exists(self, person_id: str) -> bool:
         """Check if a person percept already exists by querying MemoryKernel."""
         try:
@@ -320,6 +429,27 @@ class LearningKernel(BaseKernel):
         except ValueError:
             print("LearningKernel: Error - MemoryKernel not found")
     
+    async def _deactivate_person_percept(self, person_id: str) -> None:
+        """Deactivate a person percept when person is no longer present."""
+        try:
+            memory_kernel = ray.get_actor("MemoryKernel")
+            
+            # Get person identifier before deactivating
+            person_identifier = await self._get_person_identifier(memory_kernel, person_id)
+            
+            deactivated = await memory_kernel.deactivate_person_percept.remote(person_id)
+            if deactivated:
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                print(f"[{timestamp}] LearningKernel: Deactivated person percept {person_id}")
+                
+                # Record person leaving context in conversation history
+                await self._record_person_context_change(person_identifier, "left")
+            else:
+                print(f"LearningKernel: No active percept found for person {person_id}")
+        except ValueError:
+            print("LearningKernel: Error - MemoryKernel not found")
+    
     async def receive(self, message: KernelMessage) -> None:
         """Process learning messages and forward to Memory (non-blocking)."""
         import datetime
@@ -332,8 +462,8 @@ class LearningKernel(BaseKernel):
         elif isinstance(message, PersonPresenceMessage):
             print(f"[{timestamp}] LearningKernel: Processing person presence - present: {message.is_present}, person_id: {message.person_id}")
             
-            # Only process if person is present and we have a person_id
             if message.is_present and message.person_id:
+                # Person is present - activate their percept
                 # Check if person percept already exists via MemoryKernel
                 if not await self._person_percept_exists(message.person_id):
                     print(f"LearningKernel: Person percept for {message.person_id} not found, requesting creation")
@@ -342,11 +472,51 @@ class LearningKernel(BaseKernel):
                     print(f"LearningKernel: Person percept for {message.person_id} already exists, updating context")
                     await self._update_person_percept_context(message.person_id)
                 
+                # Record person entering context in conversation history
+                memory_kernel = ray.get_actor("MemoryKernel")
+                person_identifier = await self._get_person_identifier(memory_kernel, message.person_id)
+                await self._record_person_context_change(person_identifier, "entered")
+                
                 # After adding person percept to context, analyze for learning opportunities
                 print(f"LearningKernel: Analyzing learning opportunities for person {message.person_id}")
                 await self._analyze_learning_opportunities(message.person_id)
+            elif not message.is_present and message.person_id:
+                # Person is no longer present - deactivate their percept
+                print(f"LearningKernel: Person {message.person_id} is no longer present, deactivating percept")
+                await self._deactivate_person_percept(message.person_id)
+            elif not message.is_present and not message.person_id:
+                # No person detected at all - deactivate all person percepts and their knowledge
+                print("LearningKernel: No person detected - deactivating all person percepts")
+                try:
+                    memory_kernel = ray.get_actor("MemoryKernel")
+                    
+                    # Get currently active people to record them leaving
+                    person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
+                    active_percepts = [p for p in person_percepts if p.get("activation", 0) > 0]
+                    
+                    # Record each active person leaving
+                    for percept in active_percepts:
+                        person_id = percept.get("data", {}).get("person_id")
+                        if person_id:
+                            person_identifier = await self._get_person_identifier(memory_kernel, person_id)
+                            await self._record_person_context_change(person_identifier, "left")
+                        else:
+                            # Fallback: use percept ID if no person_id found, but make it user-friendly
+                            percept_id = percept.get("id")
+                            print(f"LearningKernel: Warning - percept {percept_id} has no person_id, recording as Unknown person")
+                            await self._record_person_context_change("Unknown person", "left")
+                    
+                    deactivated_count = await memory_kernel.deactivate_all_person_percepts.remote()
+                    print(f"LearningKernel: Deactivated {deactivated_count} person percepts due to no person detection")
+                    
+                    # If people were present, record that everyone left
+                    if active_percepts:
+                        await self._record_person_context_change("everyone", "left")
+                        
+                except ValueError:
+                    print("LearningKernel: Error - MemoryKernel not found")
             else:
-                print("LearningKernel: Person not present or no person_id provided")
+                print("LearningKernel: Person present but no person_id provided")
                 
         elif isinstance(message, ConversationMessage):
             print(f"[{timestamp}] LearningKernel: Processing conversation message from {message.speaker}: {message.content[:100]}...")

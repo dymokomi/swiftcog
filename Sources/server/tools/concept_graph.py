@@ -154,7 +154,11 @@ class ConceptGraph:
         if concept:
             for key, value in updates.items():
                 if hasattr(concept, key):
+                    # Direct attribute update
                     setattr(concept, key, value)
+                else:
+                    # Store in data dict for non-direct attributes
+                    concept.data[key] = value
             concept.meta["updated"] = time()
             self._save_to_disk()
             return True

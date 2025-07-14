@@ -108,6 +108,45 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("GUI connected via WebSocket")
     
+    # Create new session context and deactivate all person percepts when GUI connects
+    if kernel_system and kernel_system.kernel_system_actor:
+        try:
+            # Get the memory kernel and create a new session context
+            memory_kernel = ray.get_actor("MemoryKernel")
+            
+            # Check if there were any active people before starting new session
+            person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
+            active_percepts = [p for p in person_percepts if p.get("activation", 0) > 0]
+            
+            new_session_id = await memory_kernel.create_new_session_context.remote("GUI connected - new session")
+            
+            # Record session start in conversation history
+            from swiftcog_types import ConversationMessage, KernelID
+            session_message = ConversationMessage(
+                source_kernel_id=KernelID.MEMORY,
+                speaker="system", 
+                content="[Session] New session started - GUI connected",
+                store_in_memory=True
+            )
+            await memory_kernel.receive.remote(session_message)
+            
+            # Deactivate all person percepts from previous session
+            deactivated_count = await memory_kernel.deactivate_all_person_percepts.remote()
+            print(f"GUI: Created new session context {new_session_id}, deactivated {deactivated_count} person percepts")
+            
+            # If there were active people, record that the session reset
+            if active_percepts:
+                session_reset_message = ConversationMessage(
+                    source_kernel_id=KernelID.MEMORY,
+                    speaker="system",
+                    content="[Session] Previous session ended - all participants disconnected",
+                    store_in_memory=True
+                )
+                await memory_kernel.receive.remote(session_reset_message)
+            
+        except Exception as e:
+            print(f"GUI: Error creating new session context: {e}")
+    
     # Flag to control message polling
     processing_active = False
     

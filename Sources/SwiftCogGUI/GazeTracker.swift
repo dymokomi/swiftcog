@@ -29,6 +29,17 @@ public class GazeTracker: NSObject, ObservableObject {
     private let requiredWarmupFrames = 30  // Skip first 30 frames (~1 second at 30fps)
     private let requiredFaceDetections = 3  // Need 3 stable face detections before sending
     
+    // Person detection stabilization properties
+    private var personDetectionStable = false
+    private var personDetectionStartTime: Date?
+    private var stableDetectionCount = 0
+    private let stabilizationDuration: TimeInterval = 2.0  // 2 seconds
+    private let requiredStableDetections = 6  // Need 6 stable detections over 2 seconds
+    
+    // Frame processing coordination
+    private var pendingGazeState: Bool?
+    private var frameProcessingComplete = false
+    
     public override init() {
         super.init()
         requestCameraPermission()
@@ -120,7 +131,8 @@ public class GazeTracker: NSObject, ObservableObject {
         guard error == nil else {
             print("GazeTracker: Vision error: \(error!)")
             if !isWarmingUp {
-                updateLookingState(false)
+                pendingGazeState = false
+                checkFrameProcessingComplete()
             }
             return
         }
@@ -130,7 +142,8 @@ public class GazeTracker: NSObject, ObservableObject {
             let yaw = face.yaw?.doubleValue
         else {
             if !isWarmingUp {
-                updateLookingState(false) // No face => not looking
+                pendingGazeState = false
+                checkFrameProcessingComplete()
             }
             return
         }
@@ -152,19 +165,24 @@ public class GazeTracker: NSObject, ObservableObject {
             return // Don't send gaze messages during warmup
         }
         
-        // Normal operation - send gaze messages
-        updateLookingState(isLooking)
+        // Normal operation - store pending gaze state
+        pendingGazeState = isLooking
+        checkFrameProcessingComplete()
     }
     
     private func handleFeaturePrint(request: VNRequest, error: Error?) {
         guard error == nil else {
             print("GazeTracker: Feature print error: \(error!)")
             currentFeatureVector = nil
+            frameProcessingComplete = true
+            checkFrameProcessingComplete()
             return
         }
         
         guard let observation = request.results?.first as? VNFeaturePrintObservation else {
             currentFeatureVector = nil
+            frameProcessingComplete = true
+            checkFrameProcessingComplete()
             return
         }
         
@@ -175,6 +193,22 @@ public class GazeTracker: NSObject, ObservableObject {
         }
         
         currentFeatureVector = featureVector
+        frameProcessingComplete = true
+        checkFrameProcessingComplete()
+    }
+    
+    private func checkFrameProcessingComplete() {
+        // Only process gaze state when both face detection and feature vector processing are complete
+        guard let gazeState = pendingGazeState, frameProcessingComplete else {
+            return
+        }
+        
+        // Reset for next frame
+        pendingGazeState = nil
+        frameProcessingComplete = false
+        
+        // Now update the looking state with both face detection and feature vector available
+        updateLookingState(gazeState)
     }
     
     private func updateLookingState(_ newValue: Bool) {
@@ -182,12 +216,50 @@ public class GazeTracker: NSObject, ObservableObject {
             let previousValue = self.lookingAtScreen
             self.lookingAtScreen = newValue
             
-            // Only log and send messages on state changes
-            if previousValue != newValue {
+            var shouldSendMessage = false
+            var stabilizationJustCompleted = false
+            
+            // Handle person detection stabilization
+            if newValue && !previousValue {
+                // Person just started looking at screen - start stabilization period
+                self.personDetectionStartTime = Date()
+                self.personDetectionStable = false
+                self.stableDetectionCount = 0
+                print("GazeTracker: Person detection started - beginning stabilization period")
+                shouldSendMessage = true
+            } else if !newValue && previousValue {
+                // Person stopped looking at screen - reset stabilization
+                self.personDetectionStartTime = nil
+                self.personDetectionStable = false
+                self.stableDetectionCount = 0
+                print("GazeTracker: Person left - resetting stabilization")
+                shouldSendMessage = true
+            } else if newValue && previousValue {
+                // Person continues looking - check if we should stabilize
+                if let startTime = self.personDetectionStartTime, !self.personDetectionStable {
+                    let timeElapsed = Date().timeIntervalSince(startTime)
+                    self.stableDetectionCount += 1
+                    
+                    if timeElapsed >= self.stabilizationDuration && self.stableDetectionCount >= self.requiredStableDetections {
+                        self.personDetectionStable = true
+                        stabilizationJustCompleted = true
+                        print("GazeTracker: Person detection stabilized after \(String(format: "%.1f", timeElapsed))s - enabling feature vector transmission")
+                        shouldSendMessage = true
+                    }
+                }
+            }
+            
+            // Send messages on state changes or when stabilization completes
+            if shouldSendMessage {
                 let formatter = DateFormatter()
                 formatter.dateFormat = "HH:mm:ss.SSS"
                 let timestamp = formatter.string(from: Date())
-                print("[\(timestamp)] GazeTracker: Looking at screen changed: \(previousValue) -> \(newValue)")
+                
+                if previousValue != newValue {
+                    print("[\(timestamp)] GazeTracker: Looking at screen changed: \(previousValue) -> \(newValue)")
+                } else if stabilizationJustCompleted {
+                    print("[\(timestamp)] GazeTracker: Stabilization completed - sending gaze data with feature vector")
+                }
                 
                 // Send gaze data to sensing kernel
                 self.sendGazeDataMessage(lookingAtScreen: newValue, timestamp: timestamp)
@@ -208,8 +280,8 @@ public class GazeTracker: NSObject, ObservableObject {
             "timestamp": timestamp
         ]
         
-        // Add feature vector if available
-        if let featureVector = currentFeatureVector {
+        // Add feature vector only if available AND person detection is stable
+        if let featureVector = currentFeatureVector, personDetectionStable && lookingAtScreen {
             gazeData["featureVector"] = featureVector
             gazeData["featureVectorDimensions"] = featureVector.count
         }
@@ -223,8 +295,10 @@ public class GazeTracker: NSObject, ObservableObject {
             Task {
                 do {
                     try await kernelSystem.sendToBackend(jsonString)
-                    let featureInfo = currentFeatureVector != nil ? " with \(currentFeatureVector!.count)D feature vector" : ""
-                    print("[\(timestamp)] GazeTracker: Sent gaze data - looking: \(lookingAtScreen)\(featureInfo)")
+                    let hasFeatureVector = currentFeatureVector != nil && personDetectionStable && lookingAtScreen
+                    let featureInfo = hasFeatureVector ? " with \(currentFeatureVector!.count)D feature vector" : ""
+                    let stabilizationInfo = lookingAtScreen && !personDetectionStable ? " (stabilizing - no feature vector)" : ""
+                    print("[\(timestamp)] GazeTracker: Sent gaze data - looking: \(lookingAtScreen)\(featureInfo)\(stabilizationInfo)")
                 } catch {
                     print("[\(timestamp)] GazeTracker: Failed to send gaze data: \(error)")
                 }
@@ -258,6 +332,10 @@ extension GazeTracker: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             // Continue processing during warmup to detect faces, but don't send gaze messages yet
         }
+        
+        // Reset frame processing state for new frame
+        pendingGazeState = nil
+        frameProcessingComplete = false
         
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
         try? handler.perform([faceLandmarksRequest, featurePrintRequest])

@@ -315,45 +315,65 @@ class ExecutiveKernel(BaseKernel):
             return f"Error retrieving memory stats: {str(e)}"
     
     async def _get_user_knowledge_tool(self, query: str = "") -> str:
-        """Tool function to search for what the AI knows about the user."""
+        """Tool function to search for what the AI knows about the currently active user."""
         try:
             memory_kernel = ray.get_actor("MemoryKernel")
+            
+            # Get active person percepts first
+            person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
+            active_percepts = [p for p in person_percepts if p.get("activation", 0) > 0]
+            
+            if not active_percepts:
+                return "No person is currently present, so I don't have context for any user knowledge."
             
             # Get all knowledge concepts
             all_knowledge = await memory_kernel.get_concepts_by_type.remote("knowledge")
             
-            # Filter for personal information and preferences
+            # Filter for knowledge linked to currently active person percepts and that is active
             user_knowledge = []
+            active_percept_ids = {p.get("id") for p in active_percepts}
+            
             for knowledge in all_knowledge:
                 knowledge_data = knowledge.get("data", {})
                 knowledge_type = knowledge_data.get("knowledge_type", "")
                 description = knowledge_data.get("description", "")
+                activation = knowledge.get("activation", 0)
+                linked_percept = knowledge_data.get("linked_person_percept")
                 
-                # Include personal info, preferences, and other user-related knowledge
-                if knowledge_type in ["personal_info", "preference", "fact"] or "user" in description.lower():
-                    if not query or query.lower() in description.lower():
-                        user_knowledge.append(knowledge)
+                # Only include knowledge that is:
+                # 1. Currently active (activation > 0)
+                # 2. Linked to a currently active person percept OR is general knowledge
+                # 3. Matches the query if provided
+                is_person_specific = linked_percept and linked_percept in active_percept_ids
+                is_general_knowledge = not linked_percept and knowledge_type in ["personal_info", "preference", "fact"]
+                is_active = activation > 0
+                matches_query = not query or query.lower() in description.lower()
+                
+                if is_active and (is_person_specific or is_general_knowledge) and matches_query:
+                    user_knowledge.append(knowledge)
             
             if not user_knowledge:
-                return "No personal knowledge found about the user yet."
+                current_person_ids = [p.get("data", {}).get("person_id", "unknown") for p in active_percepts]
+                return f"No knowledge found for currently present person(s): {', '.join(current_person_ids)}"
             
             # Sort by creation time (newest first)
             user_knowledge.sort(key=lambda k: k.get("meta", {}).get("created", 0), reverse=True)
             
-            result = f"What I know about you:\n"
+            # Show which person(s) we're displaying knowledge for
+            current_person_ids = [p.get("data", {}).get("person_id", "unknown") for p in active_percepts]
+            result = f"What I know about the currently present person ({', '.join(current_person_ids)}):\n"
+            
             for knowledge in user_knowledge[:10]:  # Show top 10
                 knowledge_data = knowledge.get("data", {})
                 knowledge_type = knowledge_data.get("knowledge_type", "unknown")
                 description = knowledge_data.get("description", "")
-                activation = knowledge.get("activation", 0)
                 
-                status = " (active)" if activation > 0 else ""
-                result += f"- [{knowledge_type}] {description}{status}\n"
+                result += f"- [{knowledge_type}] {description}\n"
             
             if len(user_knowledge) > 10:
                 result += f"... and {len(user_knowledge) - 10} more items"
             
-            print(f"ExecutiveKernel: Retrieved {len(user_knowledge)} user knowledge items")
+            print(f"ExecutiveKernel: Retrieved {len(user_knowledge)} knowledge items for currently active person(s)")
             return result
             
         except Exception as e:
@@ -962,15 +982,11 @@ class ExecutiveKernel(BaseKernel):
             return "Error retrieving learning goals."
     
     async def _get_person_context(self, memory_kernel) -> str:
-        """Get person context information."""
+        """Get person context information for currently active people only."""
         try:
             # Get active person percepts
             person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
             active_percepts = [p for p in person_percepts if p.get("activation", 0) > 0]
-            
-            # Get knowledge concepts
-            knowledge_concepts = await memory_kernel.get_concepts_by_type.remote("knowledge")
-            recent_knowledge = sorted(knowledge_concepts, key=lambda k: k.get("meta", {}).get("created", 0), reverse=True)[:5]
             
             context_parts = []
             
@@ -982,24 +998,43 @@ class ExecutiveKernel(BaseKernel):
                 else:
                     person_ids = [p.get("data", {}).get("person_id", "unknown") for p in active_percepts]
                     context_parts.append(f"Currently perceiving {len(active_percepts)} people: {', '.join(person_ids)}")
-            
-            if recent_knowledge:
-                # Format knowledge naturally
-                knowledge_items = []
-                for knowledge in recent_knowledge:
-                    knowledge_type = knowledge.get("data", {}).get("knowledge_type", "unknown")
-                    description = knowledge.get("data", {}).get("description", "")
-                    
-                    if knowledge_type == "personal_info":
-                        knowledge_items.append(f"Personal: {description}")
-                    elif knowledge_type == "preference":
-                        knowledge_items.append(f"Preference: {description}")
-                    elif knowledge_type == "fact":
-                        knowledge_items.append(f"Fact: {description}")
-                    else:
-                        knowledge_items.append(f"{knowledge_type}: {description}")
                 
-                context_parts.append("What I know:\n" + "\n".join(knowledge_items))
+                # Get knowledge concepts linked to currently active person percepts
+                knowledge_concepts = await memory_kernel.get_concepts_by_type.remote("knowledge")
+                active_percept_ids = {p.get("id") for p in active_percepts}
+                
+                # Filter for knowledge linked to currently active people and that is active
+                relevant_knowledge = []
+                for knowledge in knowledge_concepts:
+                    knowledge_data = knowledge.get("data", {})
+                    activation = knowledge.get("activation", 0)
+                    linked_percept = knowledge_data.get("linked_person_percept")
+                    
+                    # Include knowledge that is active and linked to current person(s)
+                    if activation > 0 and linked_percept in active_percept_ids:
+                        relevant_knowledge.append(knowledge)
+                
+                if relevant_knowledge:
+                    # Sort by creation time (newest first) and take top 5
+                    relevant_knowledge.sort(key=lambda k: k.get("meta", {}).get("created", 0), reverse=True)
+                    recent_knowledge = relevant_knowledge[:5]
+                    
+                    # Format knowledge naturally
+                    knowledge_items = []
+                    for knowledge in recent_knowledge:
+                        knowledge_type = knowledge.get("data", {}).get("knowledge_type", "unknown")
+                        description = knowledge.get("data", {}).get("description", "")
+                        
+                        if knowledge_type == "personal_info":
+                            knowledge_items.append(f"Personal: {description}")
+                        elif knowledge_type == "preference":
+                            knowledge_items.append(f"Preference: {description}")
+                        elif knowledge_type == "fact":
+                            knowledge_items.append(f"Fact: {description}")
+                        else:
+                            knowledge_items.append(f"{knowledge_type}: {description}")
+                    
+                    context_parts.append("What I know:\n" + "\n".join(knowledge_items))
             
             return "\n\n".join(context_parts) if context_parts else "No person context available."
             

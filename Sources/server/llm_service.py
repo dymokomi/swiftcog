@@ -136,7 +136,7 @@ class OpenAIProvider(LLMProvider):
             ]
             
             kwargs = {
-                "model": "gpt-4o-mini",
+                "model": "gpt-4.1",
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens

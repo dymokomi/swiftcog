@@ -93,7 +93,103 @@ class MemoryKernel(BaseKernel):
         self.concept_graph.activate(percept_id, strength=1.0)
         print(f"MemoryKernel: Reactivated percept {percept_id} for person {person_id}")
         
+        # Reactivate all knowledge concepts linked to this person's percept
+        reactivated_knowledge_count = self._reactivate_person_knowledge(percept_id)
+        print(f"MemoryKernel: Reactivated {reactivated_knowledge_count} knowledge concepts for person {person_id}")
+        
         return True
+    
+    def deactivate_person_percept(self, person_id: str) -> bool:
+        """Deactivate a person percept and all knowledge linked to them when person is no longer present."""
+        # Find the existing person percept
+        results = self.concept_graph.search_by_label(
+            f"person percept {person_id}", 
+            k=10,
+            filter_fn=lambda c: c.ctype == "percept" and c.data.get("person_id") == person_id
+        )
+        
+        if not results:
+            print(f"MemoryKernel: No existing percept found for person {person_id}")
+            return False
+            
+        # Get the first (most relevant) percept
+        percept_id, score, percept = results[0]
+        
+        # Deactivate the percept
+        self.concept_graph.activate(percept_id, strength=0.0)
+        print(f"MemoryKernel: Deactivated percept {percept_id} for person {person_id}")
+        
+        # Deactivate all knowledge concepts linked to this person's percept
+        deactivated_knowledge_count = self._deactivate_person_knowledge(percept_id)
+        print(f"MemoryKernel: Deactivated {deactivated_knowledge_count} knowledge concepts for person {person_id}")
+        
+        return True
+    
+    def deactivate_all_person_percepts(self) -> int:
+        """Deactivate all person percepts and their linked knowledge. Returns number of percepts deactivated."""
+        person_percepts = self.concept_graph.get_concepts_by_type("percept")
+        deactivated_count = 0
+        total_knowledge_deactivated = 0
+        
+        for percept in person_percepts:
+            if percept.activation > 0 and percept.data.get("person_id"):
+                self.concept_graph.activate(percept.id, strength=0.0)
+                print(f"MemoryKernel: Deactivated percept {percept.id} for person {percept.data.get('person_id')}")
+                deactivated_count += 1
+                
+                # Deactivate all knowledge concepts linked to this person's percept
+                knowledge_count = self._deactivate_person_knowledge(percept.id)
+                total_knowledge_deactivated += knowledge_count
+        
+        if total_knowledge_deactivated > 0:
+            print(f"MemoryKernel: Deactivated {total_knowledge_deactivated} total knowledge concepts from all person percepts")
+        
+        return deactivated_count
+    
+    def _deactivate_person_knowledge(self, percept_id: str) -> int:
+        """Deactivate all knowledge concepts linked to a specific person percept."""
+        knowledge_concepts = self.concept_graph.get_concepts_by_type("knowledge")
+        deactivated_count = 0
+        
+        for knowledge in knowledge_concepts:
+            knowledge_data = knowledge.data
+            if knowledge_data.get("linked_person_percept") == percept_id and knowledge.activation > 0:
+                self.concept_graph.activate(knowledge.id, strength=0.0)
+                print(f"MemoryKernel: Deactivated knowledge '{knowledge.label}' linked to percept {percept_id}")
+                deactivated_count += 1
+        
+        return deactivated_count
+    
+    def _reactivate_person_knowledge(self, percept_id: str) -> int:
+        """Reactivate all knowledge concepts linked to a specific person percept."""
+        knowledge_concepts = self.concept_graph.get_concepts_by_type("knowledge")
+        reactivated_count = 0
+        
+        for knowledge in knowledge_concepts:
+            knowledge_data = knowledge.data
+            if knowledge_data.get("linked_person_percept") == percept_id and knowledge.activation == 0:
+                self.concept_graph.activate(knowledge.id, strength=1.0)
+                print(f"MemoryKernel: Reactivated knowledge '{knowledge.label}' linked to percept {percept_id}")
+                reactivated_count += 1
+        
+        return reactivated_count
+    
+    def create_new_session_context(self, description: str = None) -> str:
+        """Create a new session context and update current session."""
+        if description is None:
+            description = f"Session started at {datetime.now().isoformat()}"
+        
+        # Create new session context
+        new_session_id = self.concept_graph.add_context(
+            description=description,
+            time_info=datetime.now().isoformat()
+        )
+        
+        # Update current session
+        self._current_session_id = new_session_id
+        
+        print(f"MemoryKernel: Created new session context with ID: {new_session_id}")
+        return new_session_id
     
     def get_concepts_by_type(self, ctype: str) -> List[Dict[str, Any]]:
         """Get all concepts of a specific type (for other kernels)."""

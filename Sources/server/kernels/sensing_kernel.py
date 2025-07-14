@@ -22,6 +22,8 @@ class SensingKernel(BaseKernel):
             max_vectors_per_id=10,
             expected_dimensions=768
         )
+        
+
     
     async def receive(self, message: KernelMessage) -> None:
         """Receive and process a message (non-blocking)."""
