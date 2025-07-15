@@ -233,7 +233,7 @@ class ExecutiveKernel(BaseKernel):
             
             # If this is personal information, try to link it to active person percepts
             person_percept_id = None
-            if knowledge_type == "personal_info":
+            if knowledge_type in ["personal_info", "preference", "fact", "interest", "skill", "goal", "relationship"]:
                 # Get active person percepts
                 person_percepts = await memory_kernel.get_concepts_by_type.remote("percept")
                 active_percepts = [p for p in person_percepts if p.get("activation", 0) > 0]
@@ -243,7 +243,7 @@ class ExecutiveKernel(BaseKernel):
                     most_recent = max(active_percepts, key=lambda p: p.get("activation", 0))
                     person_percept_id = most_recent.get("id")
                     concept_data["linked_person_percept"] = person_percept_id
-                    print(f"ExecutiveKernel: Linking personal knowledge to person percept {person_percept_id}")
+                    print(f"ExecutiveKernel: Linking {knowledge_type} knowledge to person percept {person_percept_id}")
             
             concept_request = ConceptCreationRequest(
                 source_kernel_id=KernelID.EXECUTIVE,
@@ -345,7 +345,7 @@ class ExecutiveKernel(BaseKernel):
                 # 2. Linked to a currently active person percept OR is general knowledge
                 # 3. Matches the query if provided
                 is_person_specific = linked_percept and linked_percept in active_percept_ids
-                is_general_knowledge = not linked_percept and knowledge_type in ["personal_info", "preference", "fact"]
+                is_general_knowledge = not linked_percept and knowledge_type in ["personal_info", "preference", "fact", "interest", "skill", "goal", "relationship"]
                 is_active = activation > 0
                 matches_query = not query or query.lower() in description.lower()
                 

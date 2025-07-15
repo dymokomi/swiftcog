@@ -76,22 +76,76 @@ def clean_conversations():
         else:
             filtered_nodes.append(node)
     
-    # Remove edges associated with the concepts to remove
+    # Remove edges associated with the concepts to remove, but be more nuanced
+    # about preserving valuable knowledge connections
     filtered_edges = []
     removed_edges = 0
+    
+    # First pass: identify knowledge nodes and their connections
+    knowledge_node_ids = {node.get('id') for node in filtered_nodes if node.get('ctype') == 'knowledge'}
+    percept_node_ids = {node.get('id') for node in filtered_nodes if node.get('ctype') == 'percept'}
     
     for edge in edges:
         source = edge.get('source')
         target = edge.get('target')
         
-        # Keep edge only if neither source nor target is a concept to remove
-        if source not in concepts_to_remove and target not in concepts_to_remove:
-            filtered_edges.append(edge)
-        else:
+        # Remove edge if BOTH source and target are concepts to remove
+        if source in concepts_to_remove and target in concepts_to_remove:
             removed_edges += 1
+            continue
+            
+        # Remove edge if it connects TO a concept to remove (but preserve valuable knowledge)
+        if target in concepts_to_remove:
+            # If source is knowledge connected to a percept/person, this might be important context
+            # but we'll remove the context connection while preserving the knowledge node
+            removed_edges += 1
+            continue
+            
+        # Remove edge if it connects FROM a concept to remove  
+        if source in concepts_to_remove:
+            removed_edges += 1
+            continue
+            
+        # Keep all other edges (connections between knowledge, percepts, etc.)
+        filtered_edges.append(edge)
+    
+    # Second pass: remove knowledge nodes that are now orphaned 
+    # (not connected to any percepts or other valuable nodes)
+    connected_knowledge_ids = set()
+    for edge in filtered_edges:
+        source = edge.get('source')
+        target = edge.get('target')
+        
+        # If knowledge is connected to a percept, keep it
+        if source in knowledge_node_ids and target in percept_node_ids:
+            connected_knowledge_ids.add(source)
+        if target in knowledge_node_ids and source in percept_node_ids:
+            connected_knowledge_ids.add(target)
+        
+        # Also keep knowledge connected to other knowledge (conceptual relationships)
+        if source in knowledge_node_ids and target in knowledge_node_ids:
+            connected_knowledge_ids.add(source)
+            connected_knowledge_ids.add(target)
+    
+    # Remove orphaned knowledge nodes (those not connected to anything valuable)
+    final_nodes = []
+    orphaned_knowledge_count = 0
+    
+    for node in filtered_nodes:
+        if node.get('ctype') == 'knowledge' and node.get('id') not in connected_knowledge_ids:
+            # This knowledge node is orphaned, remove it
+            orphaned_knowledge_count += 1
+            print(f"🗑️  Removing orphaned knowledge: {node.get('label', 'Unknown')}")
+            
+            # Also remove any remaining edges to this orphaned node
+            node_id = node.get('id')
+            filtered_edges = [edge for edge in filtered_edges 
+                            if edge.get('source') != node_id and edge.get('target') != node_id]
+        else:
+            final_nodes.append(node)
     
     # Update the graph data
-    graph_data['nodes'] = filtered_nodes
+    graph_data['nodes'] = final_nodes
     graph_data['edges'] = filtered_edges
     
     # Save the cleaned graph
@@ -105,8 +159,11 @@ def clean_conversations():
             if count > 0:
                 print(f"✅ Removed {count} {ctype} concepts")
         
+        if orphaned_knowledge_count > 0:
+            print(f"✅ Removed {orphaned_knowledge_count} orphaned knowledge concepts")
+        
         print(f"✅ Removed {removed_edges} associated edges")
-        print(f"✅ Kept {len(filtered_nodes)} concepts (knowledge, percepts, etc.)")
+        print(f"✅ Kept {len(final_nodes)} concepts (knowledge, percepts, etc.)")
         print("🧹 Clean operation completed - session concepts removed")
         
     except Exception as e:
